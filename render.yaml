@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: account-bot
+    runtime: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m bot.main
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
+      - key: SPREADSHEET_ACCOUNTS
+        sync: false
+      - key: SPREADSHEET_ISSUED
+        sync: false
+      - key: WEBHOOK_URL
+        sync: false
+      - key: REGIONS
+        value: "546,621,545,674,538,719"
