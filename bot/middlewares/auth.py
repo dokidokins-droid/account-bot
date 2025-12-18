@@ -3,8 +3,10 @@ from typing import Callable, Dict, Any, Awaitable
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery, TelegramObject
+from aiogram.fsm.context import FSMContext
 
 from bot.services.sheets_service import sheets_service
+from bot.states.states import RegistrationStates
 from bot.config import settings
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,14 @@ class WhitelistMiddleware(BaseMiddleware):
     ) -> Any:
         user_id = None
 
+        # Проверяем FSM состояние - пропускаем пользователей в процессе регистрации
+        state: FSMContext = data.get("state")
+        if state:
+            current_state = await state.get_state()
+            # Пропускаем все состояния регистрации
+            if current_state and current_state.startswith("RegistrationStates:"):
+                return await handler(event, data)
+
         if isinstance(event, Message):
             user_id = event.from_user.id
             # Пропускаем /start для новых пользователей
@@ -35,6 +45,10 @@ class WhitelistMiddleware(BaseMiddleware):
 
             # Пропускаем feedback callbacks (они могут приходить без состояния)
             if event.data and event.data.startswith("fb:"):
+                return await handler(event, data)
+
+            # Пропускаем admin callbacks (одобрение/отклонение заявок)
+            if event.data and event.data.startswith("admin:"):
                 return await handler(event, data)
 
         if user_id:

@@ -41,7 +41,8 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
                 "⏳ Ваша заявка на рассмотрении. Ожидайте одобрения администратора."
             )
         else:
-            # Новый пользователь - запрашиваем stage
+            # Новый пользователь (или отклонённый) - сбрасываем состояние и запрашиваем stage
+            await state.clear()
             await state.set_state(RegistrationStates.waiting_for_stage)
             await message.answer(
                 "👋 Добро пожаловать!\n\n"
@@ -98,11 +99,11 @@ async def process_stage(message: Message, state: FSMContext, bot: Bot):
         await fallback_storage.add_pending_user(user_id, stage)
 
     # Отправляем запрос админу
+    admin_notified = False
     try:
         admin_message = format_user_request(
             telegram_id=user_id,
             username=message.from_user.username,
-            full_name=message.from_user.full_name,
             stage=stage,
         )
 
@@ -112,8 +113,18 @@ async def process_stage(message: Message, state: FSMContext, bot: Bot):
             reply_markup=get_admin_approval_keyboard(user_id),
             parse_mode="HTML",
         )
+        admin_notified = True
+        logger.info(f"Admin notification sent for user {user_id} (stage: {stage})")
     except Exception as e:
-        logger.error(f"Error sending request to admin: {e}")
+        logger.error(f"Error sending request to admin (ADMIN_ID={settings.ADMIN_ID}): {e}")
+
+    if not admin_notified:
+        # Если не удалось уведомить админа - сообщаем пользователю
+        await message.answer(
+            "⚠️ Не удалось отправить заявку администратору.\n"
+            "Пожалуйста, обратитесь к нему напрямую."
+        )
+        return
 
     await state.set_state(RegistrationStates.waiting_for_approval)
     await message.answer(

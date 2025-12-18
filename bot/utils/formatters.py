@@ -15,7 +15,8 @@ def format_account_message(resource: Resource, account, region: str) -> str:
         lines.append("")
         # Строка для вставки в таблицу (с табуляцией)
         tab_line = f"{account.login}\t{account.password}"
-        lines.append(f"📋 {hcode(tab_line)}")
+        lines.append(f"📋 Копировать (полная строка):")
+        lines.append(f"<pre>{tab_line}</pre>")
 
     elif resource == Resource.MAMBA:
         # Мамба: логин, пароль, пароль почты, ссылка
@@ -27,7 +28,8 @@ def format_account_message(resource: Resource, account, region: str) -> str:
         lines.append("")
         # Строка для вставки в таблицу
         tab_line = f"{account.login}\t{account.password}\t{account.email_password}\t{account.confirmation_link or ''}"
-        lines.append(f"📋 {hcode(tab_line)}")
+        lines.append(f"📋 Копировать (полная строка):")
+        lines.append(f"<pre>{tab_line}</pre>")
 
     elif resource == Resource.OK:
         # ОК: логин, пароль
@@ -36,7 +38,8 @@ def format_account_message(resource: Resource, account, region: str) -> str:
         lines.append("")
         # Строка для вставки в таблицу
         tab_line = f"{account.login}\t{account.password}"
-        lines.append(f"📋 {hcode(tab_line)}")
+        lines.append(f"📋 Копировать (полная строка):")
+        lines.append(f"<pre>{tab_line}</pre>")
 
     elif resource == Resource.GMAIL:
         # Gmail: логин, пароль, резервная почта
@@ -47,7 +50,8 @@ def format_account_message(resource: Resource, account, region: str) -> str:
         lines.append("")
         # Строка для вставки в таблицу
         tab_line = f"{account.login}\t{account.password}\t{account.backup_email or ''}"
-        lines.append(f"📋 {hcode(tab_line)}")
+        lines.append(f"📋 Копировать (полная строка):")
+        lines.append(f"<pre>{tab_line}</pre>")
 
     return "\n".join(lines)
 
@@ -71,7 +75,6 @@ def format_selection_summary(
 def format_user_request(
     telegram_id: int,
     username: str | None,
-    full_name: str,
     stage: str,
 ) -> str:
     """Форматирование запроса на одобрение для админа"""
@@ -79,6 +82,5 @@ def format_user_request(
         f"<b>🆕 Новый запрос на доступ</b>\n\n"
         f"Telegram ID: {hcode(str(telegram_id))}\n"
         f"Username: @{username or 'нет'}\n"
-        f"Имя: {full_name}\n"
         f"Stage: {hcode(stage)}"
     )

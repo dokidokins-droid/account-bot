@@ -54,11 +54,14 @@ async def process_admin_decision(
 
     elif action == "reject":
         try:
+            # Удаляем пользователя из whitelist (чтобы мог подать заявку заново)
+            await sheets_service.reject_user(user_id)
+
             # Уведомляем пользователя об отклонении
             await bot.send_message(
                 chat_id=user_id,
                 text="❌ Ваша заявка отклонена.\n\n"
-                "Обратитесь к администратору для уточнения причины.",
+                "Вы можете подать заявку повторно через /start",
             )
 
             # Обновляем сообщение админа

@@ -9,11 +9,14 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.types import BotCommand
 
 from bot.config import settings
-from bot.handlers import start, admin, account_flow, feedback
+from bot.handlers import start, admin, account_flow, feedback, statistic, proxy
 from bot.middlewares.auth import WhitelistMiddleware
 from bot.services.account_service import account_cache
+from bot.services.proxy_service import init_proxy_service
+from bot.services.sheets_service import agcm
 
 # Настройка логирования
 logging.basicConfig(
@@ -25,6 +28,18 @@ logger = logging.getLogger(__name__)
 
 async def on_startup(bot: Bot):
     """Действия при запуске бота"""
+    # Устанавливаем команды бота для меню Telegram
+    commands = [
+        BotCommand(command="start", description="Начать работу / Главное меню"),
+        BotCommand(command="statistic", description="Статистика по аккаунтам"),
+    ]
+    await bot.set_my_commands(commands)
+    logger.info("Bot commands set")
+
+    # Инициализируем сервис прокси
+    init_proxy_service(agcm)
+    logger.info("Proxy service initialized")
+
     # Предзагрузка аккаунтов в кэш (удаляются из "Базы" сразу)
     logger.info("Preloading accounts into cache...")
     await account_cache.preload_all()
@@ -65,6 +80,8 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(admin.router)
     dp.include_router(account_flow.router)
     dp.include_router(feedback.router)
+    dp.include_router(statistic.router)
+    dp.include_router(proxy.router)
 
     return dp
 

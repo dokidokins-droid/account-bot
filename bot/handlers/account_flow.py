@@ -77,27 +77,58 @@ async def process_region(
 @router.callback_query(SearchRegionCallback.filter(), AccountFlowStates.selecting_region)
 async def search_region_start(callback: CallbackQuery, state: FSMContext):
     """Начало поиска региона"""
+    from bot.keyboards.inline import get_back_to_region_keyboard
+
     data = await state.get_data()
     resource = data["resource"]
 
     await state.set_state(AccountFlowStates.searching_region)
     await callback.message.edit_text(
         f"Ресурс: <b>{resource.display_name}</b>\n\n"
-        f"🔍 Введите номер региона:",
+        f"🔍 Введите номер региона (например: 77, 50, 197):",
+        reply_markup=get_back_to_region_keyboard(),
         parse_mode="HTML",
     )
     await callback.answer()
 
 
+def is_valid_region(region: str) -> bool:
+    """Проверка валидности кода региона РФ"""
+    # Убираем пробелы и проверяем что это число
+    region = region.strip()
+    if not region.isdigit():
+        return False
+
+    code = int(region)
+    # Валидные коды регионов РФ: 01-99 и трёхзначные (102, 116, 152, 190-199, 716, 750, 777, 799 и т.д.)
+    # Упрощённая проверка: от 1 до 999
+    return 1 <= code <= 999
+
+
 @router.message(AccountFlowStates.searching_region)
 async def search_region_input(message: Message, state: FSMContext):
     """Обработка ввода региона"""
+    from bot.keyboards.inline import get_back_to_region_keyboard
+
     region = message.text.strip()
     data = await state.get_data()
     resource = data["resource"]
 
     if not region:
-        await message.answer("❌ Введите номер региона:")
+        await message.answer(
+            "❌ Введите номер региона:",
+            reply_markup=get_back_to_region_keyboard(),
+        )
+        return
+
+    # Валидация региона
+    if not is_valid_region(region):
+        await message.answer(
+            f"❌ Неверный формат региона: <b>{region}</b>\n\n"
+            f"Введите числовой код региона (например: 77, 50, 197):",
+            reply_markup=get_back_to_region_keyboard(),
+            parse_mode="HTML",
+        )
         return
 
     # Сохраняем регион и переходим к выбору количества
@@ -275,6 +306,22 @@ async def back_to_region(callback: CallbackQuery, state: FSMContext):
             reply_markup=get_region_keyboard(),
             parse_mode="HTML",
         )
+    await callback.answer()
+
+
+@router.callback_query(BackCallback.filter(F.to == "region"), AccountFlowStates.searching_region)
+async def back_to_region_from_search(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору региона из режима поиска"""
+    data = await state.get_data()
+    resource = data.get("resource")
+
+    await state.set_state(AccountFlowStates.selecting_region)
+    await callback.message.edit_text(
+        f"Ресурс: <b>{resource.display_name}</b>\n\n"
+        f"Выберите регион:",
+        reply_markup=get_region_keyboard(),
+        parse_mode="HTML",
+    )
     await callback.answer()
 
 

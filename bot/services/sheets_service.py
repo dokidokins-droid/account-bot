@@ -3,7 +3,8 @@ import base64
 import logging
 import time
 from typing import List, Optional, Any, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
+from dataclasses import dataclass
 
 import gspread_asyncio
 from google.oauth2.service_account import Credentials
@@ -17,6 +18,16 @@ logger = logging.getLogger(__name__)
 
 # Время жизни кэша пользователей (5 минут)
 USER_CACHE_TTL = 300
+
+
+@dataclass
+class AccountStatistics:
+    """Статистика по аккаунтам"""
+    total: int = 0
+    good: int = 0
+    block: int = 0
+    defect: int = 0
+    no_status: int = 0  # без статуса (пустой)
 
 
 def get_creds():
@@ -105,10 +116,19 @@ class SheetsService:
             records = await ws.get_all_records()
             for idx, record in enumerate(records, start=2):
                 if record.get("telegram_id") == telegram_id:
+                    # Правильно парсим is_approved (может быть True/False/TRUE/FALSE/"TRUE"/"FALSE"/1/0)
+                    approved_value = record.get("approved", False)
+                    if isinstance(approved_value, bool):
+                        is_approved = approved_value
+                    elif isinstance(approved_value, str):
+                        is_approved = approved_value.lower() in ("true", "1", "yes")
+                    else:
+                        is_approved = bool(approved_value)
+
                     user = User(
                         telegram_id=telegram_id,
                         stage=record.get("stage", ""),
-                        is_approved=bool(record.get("approved", False)),
+                        is_approved=is_approved,
                         row_index=idx,
                     )
                     self._cache_user(telegram_id, user)
@@ -155,6 +175,25 @@ class SheetsService:
             return False
         except Exception as e:
             logger.error(f"Error approving user: {e}")
+            raise
+
+    async def reject_user(self, telegram_id: int) -> bool:
+        """Отклонить и удалить пользователя из whitelist (чтобы мог подать заявку заново)"""
+        try:
+            user = await self.get_user_by_telegram_id(telegram_id)
+            if user and user.row_index:
+                agc = await self._get_client()
+                ss = await agc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
+                ws = await ss.worksheet(settings.SHEET_NAMES["whitelist"])
+
+                # Удаляем строку пользователя
+                await ws.delete_rows(user.row_index)
+                # Инвалидируем кэш
+                self._invalidate_user_cache(telegram_id)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error rejecting user: {e}")
             raise
 
     # === Аккаунты ===
@@ -391,6 +430,98 @@ class SheetsService:
         except Exception as e:
             logger.error(f"Error getting accounts count: {e}")
             return 0
+
+    # === Статистика ===
+
+    async def get_statistics(
+        self,
+        resource: Resource,
+        gender: Gender,
+        region: Optional[str],  # None означает все регионы
+        period: str,  # day, week, month
+    ) -> AccountStatistics:
+        """Получить статистику выданных аккаунтов за период"""
+        try:
+            agc = await self._get_client()
+            ss = await agc.open_by_key(settings.SPREADSHEET_ISSUED)
+
+            sheet_name = self._get_sheet_name(resource, gender)
+            ws = await ss.worksheet(sheet_name)
+
+            all_values = await ws.get_all_values()
+
+            # Определяем дату начала периода
+            now = datetime.now()
+            if period == "day":
+                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "week":
+                start_date = now - timedelta(days=7)
+            elif period == "month":
+                start_date = now - timedelta(days=30)
+            else:
+                start_date = now - timedelta(days=1)
+
+            stats = AccountStatistics()
+
+            # Формат таблицы выданных: date | account_data... | region | employee | status
+            # Заголовок в первой строке
+            if len(all_values) < 2:
+                return stats
+
+            header = all_values[0]
+
+            # Находим индексы нужных колонок
+            # Предполагаем: date (0), region (-3), employee (-2), status (-1)
+            date_col = 0
+            # Находим индекс колонки региона и статуса
+            region_col = len(header) - 3 if len(header) >= 3 else -1
+            status_col = len(header) - 1 if len(header) >= 1 else -1
+
+            for row in all_values[1:]:
+                if not row or not row[0]:
+                    continue
+
+                # Парсим дату
+                try:
+                    row_date = datetime.strptime(row[date_col], "%Y-%m-%d")
+                except (ValueError, IndexError):
+                    continue
+
+                # Проверяем период
+                if row_date < start_date:
+                    continue
+
+                # Проверяем регион (если указан)
+                if region and region != "all":
+                    try:
+                        row_region = row[region_col] if region_col >= 0 and len(row) > region_col else ""
+                        if row_region != region:
+                            continue
+                    except IndexError:
+                        continue
+
+                # Подсчитываем статистику
+                stats.total += 1
+
+                try:
+                    status = row[status_col].lower().strip() if status_col >= 0 and len(row) > status_col else ""
+                except IndexError:
+                    status = ""
+
+                if status == "good" or status == "хороший":
+                    stats.good += 1
+                elif status == "block" or status == "блок":
+                    stats.block += 1
+                elif status == "defect" or status == "дефектный":
+                    stats.defect += 1
+                else:
+                    stats.no_status += 1
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error getting statistics: {e}")
+            return AccountStatistics()
 
 
 sheets_service = SheetsService()
