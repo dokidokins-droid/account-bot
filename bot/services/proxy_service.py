@@ -17,6 +17,24 @@ logger = logging.getLogger(__name__)
 PROXY_SHEET_NAME = "Прокси"
 
 
+def parse_date(date_str: str) -> date:
+    """Парсинг даты в форматах dd.mm.yy или YYYY-MM-DD (для совместимости)"""
+    if not date_str:
+        return date.today()
+
+    # Сначала пробуем новый формат dd.mm.yy
+    try:
+        return datetime.strptime(date_str, "%d.%m.%y").date()
+    except ValueError:
+        pass
+
+    # Затем старый формат YYYY-MM-DD
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return date.today()
+
+
 class ProxyService:
     """Сервис для работы с прокси"""
 
@@ -41,7 +59,7 @@ class ProxyService:
             ws = await ss.add_worksheet(PROXY_SHEET_NAME, rows=1000, cols=10)
             # Добавляем заголовки
             await ws.append_row(
-                ["proxy", "country", "added_date", "expires_date", "used_for"],
+                ["proxy", "country", "added_date", "expires_date", "used_for", "proxy_type"],
                 value_input_option="USER_ENTERED",
             )
         return ws
@@ -74,14 +92,25 @@ class ProxyService:
     async def add_proxies(
         self,
         proxies: List[str],
-        resource: str,
+        resources: List[str],
         duration_days: int,
+        proxy_type: str = "http",
     ) -> List[Dict]:
-        """Добавить список прокси в таблицу"""
+        """Добавить список прокси в таблицу
+
+        Args:
+            proxies: Список прокси строк
+            resources: Список ресурсов для которых использованы прокси
+            duration_days: Срок действия в днях
+            proxy_type: Тип прокси (http или socks5)
+        """
         ws = await self._get_worksheet()
         results = []
         today = date.today()
         expires = today + timedelta(days=duration_days)
+
+        # Формируем строку ресурсов через запятую
+        used_for_str = ",".join([r.lower() for r in resources])
 
         for proxy_str in proxies:
             proxy_str = proxy_str.strip()
@@ -96,9 +125,10 @@ class ProxyService:
             row_data = [
                 proxy_str,
                 country,
-                today.strftime("%Y-%m-%d"),
-                expires.strftime("%Y-%m-%d"),
-                resource.lower(),  # used_for
+                today.strftime("%d.%m.%y"),
+                expires.strftime("%d.%m.%y"),
+                used_for_str,  # used_for - список ресурсов
+                proxy_type,  # proxy_type
             ]
 
             await ws.append_row(row_data, value_input_option="USER_ENTERED")
@@ -107,7 +137,7 @@ class ProxyService:
                 "proxy": proxy_str,
                 "country": country,
                 "country_flag": get_country_flag(country),
-                "expires": expires.strftime("%Y-%m-%d"),
+                "expires": expires.strftime("%d.%m.%y"),
             })
 
             # Небольшая задержка чтобы не превысить лимиты API
@@ -132,10 +162,11 @@ class ProxyService:
                 proxy = Proxy(
                     proxy=row[0],
                     country=row[1] if len(row) > 1 else "UNKNOWN",
-                    added_date=datetime.strptime(row[2], "%Y-%m-%d").date() if len(row) > 2 and row[2] else date.today(),
-                    expires_date=datetime.strptime(row[3], "%Y-%m-%d").date() if len(row) > 3 and row[3] else date.today(),
+                    added_date=parse_date(row[2] if len(row) > 2 else ""),
+                    expires_date=parse_date(row[3] if len(row) > 3 else ""),
                     used_for=Proxy.parse_used_for(row[4] if len(row) > 4 else ""),
                     row_index=idx,
+                    proxy_type=row[5] if len(row) > 5 and row[5] else "http",  # Дефолт http для старых записей
                 )
                 proxies.append(proxy)
             except Exception as e:
@@ -215,10 +246,11 @@ class ProxyService:
             proxy = Proxy(
                 proxy=row[0],
                 country=row[1] if len(row) > 1 else "UNKNOWN",
-                added_date=datetime.strptime(row[2], "%Y-%m-%d").date() if len(row) > 2 and row[2] else date.today(),
-                expires_date=datetime.strptime(row[3], "%Y-%m-%d").date() if len(row) > 3 and row[3] else date.today(),
+                added_date=parse_date(row[2] if len(row) > 2 else ""),
+                expires_date=parse_date(row[3] if len(row) > 3 else ""),
                 used_for=used_for,
                 row_index=row_index,
+                proxy_type=row[5] if len(row) > 5 and row[5] else "http",
             )
 
             logger.info(f"User {user_id} took proxy {proxy.ip_short} for {resource}")
@@ -244,10 +276,11 @@ class ProxyService:
             return Proxy(
                 proxy=row[0],
                 country=row[1] if len(row) > 1 else "UNKNOWN",
-                added_date=datetime.strptime(row[2], "%Y-%m-%d").date() if len(row) > 2 and row[2] else date.today(),
-                expires_date=datetime.strptime(row[3], "%Y-%m-%d").date() if len(row) > 3 and row[3] else date.today(),
+                added_date=parse_date(row[2] if len(row) > 2 else ""),
+                expires_date=parse_date(row[3] if len(row) > 3 else ""),
                 used_for=Proxy.parse_used_for(row[4] if len(row) > 4 else ""),
                 row_index=row_index,
+                proxy_type=row[5] if len(row) > 5 and row[5] else "http",
             )
         except Exception as e:
             logger.error(f"Error getting proxy by row {row_index}: {e}")

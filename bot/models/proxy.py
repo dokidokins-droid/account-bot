@@ -12,6 +12,7 @@ class Proxy:
     expires_date: date  # Дата истечения
     used_for: List[str] = field(default_factory=list)  # Список ресурсов для которых использован
     row_index: Optional[int] = None  # Индекс строки в таблице
+    proxy_type: str = "http"  # Тип прокси: http или socks5
 
     @property
     def ip(self) -> str:
@@ -57,3 +58,58 @@ class Proxy:
         if not used_for_str:
             return []
         return [r.strip().lower() for r in used_for_str.split(",") if r.strip()]
+
+    @property
+    def port(self) -> Optional[int]:
+        """Получить порт из прокси строки"""
+        parts = self.proxy.split(":")
+        if len(parts) >= 2:
+            try:
+                return int(parts[1])
+            except ValueError:
+                return None
+        return None
+
+    @property
+    def auth(self) -> str:
+        """Получить аутентификацию (user:pass) если есть"""
+        parts = self.proxy.split(":")
+        if len(parts) >= 4:
+            return f"{parts[2]}:{parts[3]}"
+        return ""
+
+    def get_http_proxy(self) -> str:
+        """Получить HTTP вариант прокси с полным URL"""
+        port = self.port
+        if port is None:
+            return f"http://{self.proxy}"
+
+        if self.proxy_type == "socks5":
+            # Для SOCKS5 прокси: HTTP порт = текущий порт - 1
+            http_port = port - 1
+        else:
+            # Уже HTTP
+            http_port = port
+
+        auth = self.auth
+        if auth:
+            return f"http://{self.ip}:{http_port}:{auth}"
+        return f"http://{self.ip}:{http_port}"
+
+    def get_socks5_proxy(self) -> str:
+        """Получить SOCKS5 вариант прокси с полным URL"""
+        port = self.port
+        if port is None:
+            return f"socks5://{self.proxy}"
+
+        if self.proxy_type == "http":
+            # Для HTTP прокси: SOCKS5 порт = текущий порт + 1
+            socks5_port = port + 1
+        else:
+            # Уже SOCKS5
+            socks5_port = port
+
+        auth = self.auth
+        if auth:
+            return f"socks5://{self.ip}:{socks5_port}:{auth}"
+        return f"socks5://{self.ip}:{socks5_port}"

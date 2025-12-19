@@ -20,6 +20,24 @@ logger = logging.getLogger(__name__)
 USER_CACHE_TTL = 300
 
 
+def parse_date(date_str: str) -> datetime:
+    """Парсинг даты в форматах dd.mm.yy или YYYY-MM-DD (для совместимости)"""
+    if not date_str:
+        return datetime.now()
+
+    # Сначала пробуем новый формат dd.mm.yy
+    try:
+        return datetime.strptime(date_str, "%d.%m.%y")
+    except ValueError:
+        pass
+
+    # Затем старый формат YYYY-MM-DD
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return datetime.now()
+
+
 @dataclass
 class AccountStatistics:
     """Статистика по аккаунтам"""
@@ -201,7 +219,11 @@ class SheetsService:
     async def get_accounts(
         self, resource: Resource, gender: Gender, quantity: int
     ) -> List[Any]:
-        """Получить аккаунты из таблицы"""
+        """
+        Получить аккаунты из таблицы.
+
+        Формат таблицы База: дата | логин | пароль | ...
+        """
         try:
             agc = await self._get_client()
             ss = await agc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
@@ -216,7 +238,8 @@ class SheetsService:
             for idx, row in enumerate(all_values[1:], start=2):
                 if len(accounts) >= quantity:
                     break
-                if not row or not row[0]:
+                # Проверяем наличие логина (колонка 1, т.к. колонка 0 — дата)
+                if not row or len(row) < 2 or not row[1]:
                     continue
 
                 account = self._parse_account(resource, row, idx)
@@ -229,33 +252,39 @@ class SheetsService:
             raise
 
     def _parse_account(self, resource: Resource, row: List[str], row_index: int):
-        """Парсинг строки в объект аккаунта"""
+        """
+        Парсинг строки в объект аккаунта.
+
+        Формат таблицы База: дата | логин | пароль | ...
+        Индексы: [0]=дата, [1]=логин, [2]=пароль, [3+]=доп. поля
+        """
         try:
+            # Пропускаем первую колонку (дата)
             if resource == Resource.VK:
                 return VKAccount(
-                    login=row[0],
-                    password=row[1],
+                    login=row[1],
+                    password=row[2],
                     row_index=row_index,
                 )
             elif resource == Resource.MAMBA:
                 return MambaAccount(
-                    login=row[0],
-                    password=row[1],
-                    email_password=row[2] if len(row) > 2 else "",
-                    confirmation_link=row[3] if len(row) > 3 else "",
+                    login=row[1],
+                    password=row[2],
+                    email_password=row[3] if len(row) > 3 else "",
+                    confirmation_link=row[4] if len(row) > 4 else "",
                     row_index=row_index,
                 )
             elif resource == Resource.OK:
                 return OKAccount(
-                    login=row[0],
-                    password=row[1],
+                    login=row[1],
+                    password=row[2],
                     row_index=row_index,
                 )
             elif resource == Resource.GMAIL:
                 return GmailAccount(
-                    login=row[0],
-                    password=row[1],
-                    backup_email=row[2] if len(row) > 2 and row[2] else None,
+                    login=row[1],
+                    password=row[2],
+                    backup_email=row[3] if len(row) > 3 and row[3] else None,
                     row_index=row_index,
                 )
         except IndexError as e:
@@ -337,7 +366,7 @@ class SheetsService:
             sheet_name = self._get_sheet_name(resource, gender)
             ws = await ss.worksheet(sheet_name)
 
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            date_str = datetime.now().strftime("%d.%m.%y")
 
             rows = []
             for account_data, region, employee_stage, status in accounts_data:
@@ -370,7 +399,7 @@ class SheetsService:
             sheet_name = self._get_sheet_name(resource, gender)
             ws = await ss.worksheet(sheet_name)
 
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            date_str = datetime.now().strftime("%d.%m.%y")
 
             # Формируем строку: date | данные аккаунта... | region | employee | status
             row_data = [date_str] + account_data + [region, employee_stage, ""]
@@ -415,7 +444,11 @@ class SheetsService:
             raise
 
     async def get_accounts_count(self, resource: Resource, gender: Gender) -> int:
-        """Получить количество доступных аккаунтов"""
+        """
+        Получить количество доступных аккаунтов.
+
+        Формат таблицы: дата | логин | пароль | ...
+        """
         try:
             agc = await self._get_client()
             ss = await agc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
@@ -424,8 +457,8 @@ class SheetsService:
             ws = await ss.worksheet(sheet_name)
 
             all_values = await ws.get_all_values()
-            # Минус заголовок, минус пустые строки
-            count = sum(1 for row in all_values[1:] if row and row[0])
+            # Минус заголовок, минус пустые строки (проверяем колонку логина)
+            count = sum(1 for row in all_values[1:] if row and len(row) > 1 and row[1])
             return count
         except Exception as e:
             logger.error(f"Error getting accounts count: {e}")
@@ -481,9 +514,9 @@ class SheetsService:
                 if not row or not row[0]:
                     continue
 
-                # Парсим дату
+                # Парсим дату (поддержка dd.mm.yy и YYYY-MM-DD)
                 try:
-                    row_date = datetime.strptime(row[date_col], "%Y-%m-%d")
+                    row_date = parse_date(row[date_col])
                 except (ValueError, IndexError):
                     continue
 
@@ -522,6 +555,95 @@ class SheetsService:
         except Exception as e:
             logger.error(f"Error getting statistics: {e}")
             return AccountStatistics()
+
+    async def get_statistics_by_regions(
+        self,
+        resource: Resource,
+        gender: Gender,
+        regions: List[str],  # Список регионов для подсчёта
+        period: str,  # day, week, month
+    ) -> Dict[str, AccountStatistics]:
+        """Получить статистику по каждому региону отдельно"""
+        try:
+            agc = await self._get_client()
+            ss = await agc.open_by_key(settings.SPREADSHEET_ISSUED)
+
+            sheet_name = self._get_sheet_name(resource, gender)
+            ws = await ss.worksheet(sheet_name)
+
+            all_values = await ws.get_all_values()
+
+            # Определяем дату начала периода
+            now = datetime.now()
+            if period == "day":
+                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "week":
+                start_date = now - timedelta(days=7)
+            elif period == "month":
+                start_date = now - timedelta(days=30)
+            else:
+                start_date = now - timedelta(days=1)
+
+            # Инициализируем статистику для каждого региона
+            stats_by_region: Dict[str, AccountStatistics] = {
+                region: AccountStatistics() for region in regions
+            }
+
+            if len(all_values) < 2:
+                return stats_by_region
+
+            header = all_values[0]
+            date_col = 0
+            region_col = len(header) - 3 if len(header) >= 3 else -1
+            status_col = len(header) - 1 if len(header) >= 1 else -1
+
+            for row in all_values[1:]:
+                if not row or not row[0]:
+                    continue
+
+                # Парсим дату (поддержка dd.mm.yy и YYYY-MM-DD)
+                try:
+                    row_date = parse_date(row[date_col])
+                except (ValueError, IndexError):
+                    continue
+
+                # Проверяем период
+                if row_date < start_date:
+                    continue
+
+                # Получаем регион строки
+                try:
+                    row_region = row[region_col] if region_col >= 0 and len(row) > region_col else ""
+                except IndexError:
+                    continue
+
+                # Если регион не в списке - пропускаем
+                if row_region not in stats_by_region:
+                    continue
+
+                # Подсчитываем статистику для этого региона
+                stats = stats_by_region[row_region]
+                stats.total += 1
+
+                try:
+                    status = row[status_col].lower().strip() if status_col >= 0 and len(row) > status_col else ""
+                except IndexError:
+                    status = ""
+
+                if status == "good" or status == "хороший":
+                    stats.good += 1
+                elif status == "block" or status == "блок":
+                    stats.block += 1
+                elif status == "defect" or status == "дефектный":
+                    stats.defect += 1
+                else:
+                    stats.no_status += 1
+
+            return stats_by_region
+
+        except Exception as e:
+            logger.error(f"Error getting statistics by regions: {e}")
+            return {region: AccountStatistics() for region in regions}
 
 
 sheets_service = SheetsService()

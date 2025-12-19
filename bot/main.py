@@ -12,11 +12,12 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiogram.types import BotCommand
 
 from bot.config import settings
-from bot.handlers import start, admin, account_flow, feedback, statistic, proxy
+from bot.handlers import start, admin, account_flow, feedback, statistic, proxy, numbers
 from bot.middlewares.auth import WhitelistMiddleware
 from bot.services.account_service import account_cache
 from bot.services.proxy_service import init_proxy_service
 from bot.services.sheets_service import agcm
+from bot.services.number_service import number_service
 
 # Настройка логирования
 logging.basicConfig(
@@ -39,6 +40,10 @@ async def on_startup(bot: Bot):
     # Инициализируем сервис прокси
     init_proxy_service(agcm)
     logger.info("Proxy service initialized")
+
+    # Создаём листы для номеров если их нет
+    await number_service.ensure_sheets_exist()
+    logger.info("Number sheets initialized")
 
     # Предзагрузка аккаунтов в кэш (удаляются из "Базы" сразу)
     logger.info("Preloading accounts into cache...")
@@ -82,6 +87,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(feedback.router)
     dp.include_router(statistic.router)
     dp.include_router(proxy.router)
+    dp.include_router(numbers.router)
 
     return dp
 

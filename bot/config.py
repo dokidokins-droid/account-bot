@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     WEBHOOK_URL: str = ""
     WEBHOOK_PATH: str = "/webhook"
 
-    # Названия листов
+    # Названия листов для аккаунтов
+    # Формат таблицы База: дата | логин | пароль | ...
+    # Формат таблицы Выдача: дата | логин | пароль | ... | регион | employee | status
     SHEET_NAMES: dict = {
         "vk_male": "ВК Муж",
         "vk_female": "ВК Жен",
@@ -36,6 +38,11 @@ class Settings(BaseSettings):
         "gmail_domain": "Гугл Гмейл",
         "gmail_any": "Гугл Обыч",
         "whitelist": "whitelist",
+        # Номера телефонов (общие для Beboo/Loloo/Табор)
+        # Формат База: дата | номер
+        # Формат Выдача: дата | номер | регион | employee | ресурсы
+        "numbers": "Номера",
+        "numbers_issued": "Номера Выдано",
     }
 
     class Config:

@@ -135,6 +135,61 @@ class ProxyDuration(str, Enum):
         return f"{self.value}д"
 
 
+class ProxyType(str, Enum):
+    """Тип прокси"""
+    HTTP = "http"
+    SOCKS5 = "socks5"
+
+    @property
+    def display_name(self) -> str:
+        names = {
+            "http": "HTTP",
+            "socks5": "SOCKS5",
+        }
+        return names[self.value]
+
+    @property
+    def emoji(self) -> str:
+        emojis = {
+            "http": "🌐",
+            "socks5": "🔒",
+        }
+        return emojis[self.value]
+
+    @property
+    def button_text(self) -> str:
+        return f"{self.emoji} {self.display_name}"
+
+
+class NumberResource(str, Enum):
+    """Ресурсы для номеров телефонов"""
+    BEBOO = "beboo"
+    LOLOO = "loloo"
+    TABOR = "tabor"
+
+    @property
+    def display_name(self) -> str:
+        names = {
+            "beboo": "Beboo",
+            "loloo": "Loloo",
+            "tabor": "Табор",
+        }
+        return names[self.value]
+
+    @property
+    def emoji(self) -> str:
+        emojis = {
+            "beboo": "🟠",
+            "loloo": "🔵",
+            "tabor": "🟤",
+        }
+        return emojis[self.value]
+
+    @property
+    def button_text(self) -> str:
+        return f"{self.emoji} {self.display_name}"
+
+
 # Названия стран
 COUNTRY_NAMES = {
     "RU": "Россия",

@@ -18,11 +18,14 @@ from bot.keyboards.callbacks import (
     StatSearchRegionCallback,
     StatPeriodCallback,
     StatBackCallback,
+    StatDetailedByRegionsCallback,
     # Прокси
     ProxyMenuCallback,
+    # Номера
+    NumberMenuCallback,
 )
 from bot.models.enums import Resource, Gender
-from bot.config import settings
+from bot.services.region_service import region_service
 
 
 def get_admin_approval_keyboard(user_id: int) -> InlineKeyboardMarkup:
@@ -48,20 +51,26 @@ def get_resource_keyboard() -> InlineKeyboardMarkup:
             text=resource.button_text,
             callback_data=ResourceCallback(resource=resource.value),
         )
-    # Кнопка прокси на всю ширину
+    # Кнопка номеров
+    builder.button(
+        text="📱 Номера",
+        callback_data=NumberMenuCallback(action="open"),
+    )
+    # Кнопка прокси
     builder.button(
         text="🌐 Прокси",
         callback_data=ProxyMenuCallback(action="open"),
     )
-    # Ресурсы по 2 в ряд, прокси на всю ширину
-    builder.adjust(2, 2, 2, 2, 1)
+    # Ресурсы по 2 в ряд, номера и прокси по 2 в ряд
+    builder.adjust(2, 2, 2, 2)
     return builder.as_markup()
 
 
 def get_region_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура выбора региона"""
     builder = InlineKeyboardBuilder()
-    for region in settings.regions_list:
+    # Получаем отсортированный список регионов из сервиса
+    for region in region_service.get_regions():
         builder.button(
             text=region,
             callback_data=RegionCallback(region=region),
@@ -77,7 +86,7 @@ def get_region_keyboard() -> InlineKeyboardMarkup:
         callback_data=BackCallback(to="resource"),
     )
     # Регионы по 3 в ряд, затем поиск и назад по одной кнопке на строку
-    regions_count = len(settings.regions_list)
+    regions_count = len(region_service.get_regions())
     builder.adjust(*([3] * (regions_count // 3 + (1 if regions_count % 3 else 0))), 1, 1)
     return builder.as_markup()
 
@@ -230,7 +239,8 @@ def get_stat_region_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура выбора региона для статистики (с кнопкой 'Все регионы')"""
     builder = InlineKeyboardBuilder()
 
-    for region in settings.regions_list:
+    # Получаем отсортированный список регионов из сервиса
+    for region in region_service.get_regions():
         builder.button(
             text=region,
             callback_data=StatRegionCallback(region=region),
@@ -253,7 +263,7 @@ def get_stat_region_keyboard() -> InlineKeyboardMarkup:
     )
 
     # Layout: регионы по 3, затем поиск (1), все регионы (1), назад (1)
-    regions_count = len(settings.regions_list)
+    regions_count = len(region_service.get_regions())
     builder.adjust(*([3] * (regions_count // 3 + (1 if regions_count % 3 else 0))), 1, 1, 1)
     return builder.as_markup()
 
@@ -290,4 +300,15 @@ def get_stat_period_keyboard() -> InlineKeyboardMarkup:
         callback_data=StatBackCallback(to="region"),
     )
     builder.adjust(3, 1)
+    return builder.as_markup()
+
+
+def get_stat_detailed_keyboard(resource: str, gender: str, period: str) -> InlineKeyboardMarkup:
+    """Клавиатура с кнопкой 'Детальнее по регионам' для общей статистики"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="📊 Детальнее по регионам",
+        callback_data=StatDetailedByRegionsCallback(resource=resource, gender=gender, period=period),
+    )
+    builder.adjust(1)
     return builder.as_markup()

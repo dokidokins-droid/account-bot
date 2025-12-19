@@ -13,6 +13,9 @@ from bot.keyboards.callbacks import (
     ProxySelectCallback,
     ProxyPageCallback,
     ProxyBackCallback,
+    ProxyTypeCallback,
+    ProxyResourceToggleCallback,
+    ProxyResourceConfirmCallback,
 )
 from bot.keyboards.proxy_keyboards import (
     get_proxy_menu_keyboard,
@@ -21,9 +24,11 @@ from bot.keyboards.proxy_keyboards import (
     get_proxy_countries_keyboard,
     get_proxy_list_keyboard,
     get_proxy_back_keyboard,
+    get_proxy_type_keyboard,
+    get_proxy_resource_multi_keyboard,
 )
 from bot.keyboards.inline import get_resource_keyboard
-from bot.models.enums import ProxyResource, ProxyDuration, get_country_flag
+from bot.models.enums import ProxyResource, ProxyDuration, ProxyType, get_country_flag
 from bot.services.proxy_service import get_proxy_service
 
 logger = logging.getLogger(__name__)
@@ -38,6 +43,7 @@ async def proxy_from_main_menu(
     state: FSMContext,
 ):
     """Переход в меню прокси из главного меню выбора ресурсов"""
+    await callback.answer()
     await state.set_state(ProxyStates.main_menu)
     await callback.message.edit_text(
         "🌐 <b>Прокси</b>\n\n"
@@ -45,7 +51,6 @@ async def proxy_from_main_menu(
         reply_markup=get_proxy_menu_keyboard(),
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 # === Главное меню прокси ===
@@ -57,15 +62,15 @@ async def proxy_menu_action(
     state: FSMContext,
 ):
     """Обработка выбора в главном меню прокси"""
+    await callback.answer()
     action = callback_data.action
 
     if action == "add":
-        await state.set_state(ProxyStates.add_waiting_proxy)
+        await state.set_state(ProxyStates.add_selecting_type)
         await callback.message.edit_text(
             "➕ <b>Добавление прокси</b>\n\n"
-            "Отправьте прокси (каждый с новой строки):\n"
-            "<code>ip:port</code> или <code>ip:port:user:pass</code>",
-            reply_markup=get_proxy_back_keyboard("menu"),
+            "Выберите тип прокси:",
+            reply_markup=get_proxy_type_keyboard(),
             parse_mode="HTML",
         )
 
@@ -78,10 +83,31 @@ async def proxy_menu_action(
             parse_mode="HTML",
         )
 
-    await callback.answer()
-
 
 # === Добавление прокси ===
+
+@router.callback_query(ProxyTypeCallback.filter(), ProxyStates.add_selecting_type)
+async def add_proxy_type(
+    callback: CallbackQuery,
+    callback_data: ProxyTypeCallback,
+    state: FSMContext,
+):
+    """Выбор типа прокси (HTTP/SOCKS5)"""
+    proxy_type = ProxyType(callback_data.proxy_type)
+
+    await state.update_data(proxy_type=proxy_type.value)
+    await state.set_state(ProxyStates.add_waiting_proxy)
+
+    await callback.message.edit_text(
+        f"➕ <b>Добавление прокси</b>\n"
+        f"Тип: <b>{proxy_type.display_name}</b>\n\n"
+        "Отправьте прокси (каждый с новой строки):\n"
+        "<code>ip:port</code> или <code>ip:port:user:pass</code>",
+        reply_markup=get_proxy_back_keyboard("type"),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
 
 @router.message(ProxyStates.add_waiting_proxy)
 async def add_proxy_receive(message: Message, state: FSMContext):
@@ -91,7 +117,7 @@ async def add_proxy_receive(message: Message, state: FSMContext):
     if not text:
         await message.answer(
             "❌ Отправьте список прокси",
-            reply_markup=get_proxy_back_keyboard("menu"),
+            reply_markup=get_proxy_back_keyboard("type"),
         )
         return
 
@@ -101,36 +127,79 @@ async def add_proxy_receive(message: Message, state: FSMContext):
     if not proxies:
         await message.answer(
             "❌ Не удалось распознать прокси",
-            reply_markup=get_proxy_back_keyboard("menu"),
+            reply_markup=get_proxy_back_keyboard("type"),
         )
         return
 
     # Сохраняем в state
-    await state.update_data(proxies=proxies)
-    await state.set_state(ProxyStates.add_selecting_resource)
+    await state.update_data(proxies=proxies, selected_resources=[])
+    await state.set_state(ProxyStates.add_selecting_resources)
 
     await message.answer(
         f"📝 Получено прокси: <b>{len(proxies)}</b>\n\n"
-        "Выберите ресурс, для которого использовались:",
-        reply_markup=get_proxy_resource_keyboard("add"),
+        "Выберите ресурсы, для которых использовались:\n"
+        "<i>(можно выбрать несколько)</i>",
+        reply_markup=get_proxy_resource_multi_keyboard([]),
         parse_mode="HTML",
     )
 
 
-@router.callback_query(ProxyResourceCallback.filter(F.mode == "add"), ProxyStates.add_selecting_resource)
-async def add_proxy_resource(
+@router.callback_query(ProxyResourceToggleCallback.filter(), ProxyStates.add_selecting_resources)
+async def add_proxy_toggle_resource(
     callback: CallbackQuery,
-    callback_data: ProxyResourceCallback,
+    callback_data: ProxyResourceToggleCallback,
     state: FSMContext,
 ):
-    """Выбор ресурса при добавлении"""
-    resource = ProxyResource(callback_data.resource)
+    """Toggle выбора ресурса (добавить/убрать)"""
+    resource = callback_data.resource
+    data = await state.get_data()
+    selected = data.get("selected_resources", [])
 
-    await state.update_data(add_resource=resource.value)
+    # Toggle ресурса
+    if resource in selected:
+        selected.remove(resource)
+    else:
+        selected.append(resource)
+
+    await state.update_data(selected_resources=selected)
+
+    # Обновляем клавиатуру
+    proxies = data.get("proxies", [])
+    await callback.message.edit_text(
+        f"📝 Получено прокси: <b>{len(proxies)}</b>\n\n"
+        "Выберите ресурсы, для которых использовались:\n"
+        "<i>(можно выбрать несколько)</i>",
+        reply_markup=get_proxy_resource_multi_keyboard(selected),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(ProxyResourceConfirmCallback.filter(), ProxyStates.add_selecting_resources)
+async def add_proxy_confirm_resources(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    """Подтверждение выбора ресурсов"""
+    data = await state.get_data()
+    selected = data.get("selected_resources", [])
+
+    if not selected:
+        await callback.answer("❌ Выберите хотя бы один ресурс!", show_alert=True)
+        return
+
+    # Формируем текст выбранных ресурсов
+    resource_names = []
+    for r in selected:
+        try:
+            resource_names.append(ProxyResource(r).display_name)
+        except ValueError:
+            resource_names.append(r)
+
     await state.set_state(ProxyStates.add_selecting_duration)
 
     await callback.message.edit_text(
-        f"📝 Ресурс: <b>{resource.display_name}</b>\n\n"
+        f"📝 Ресурсы: <b>{', '.join(resource_names)}</b>\n\n"
         "Выберите срок действия:",
         reply_markup=get_proxy_duration_keyboard(),
         parse_mode="HTML",
@@ -150,7 +219,8 @@ async def add_proxy_duration(
     duration = ProxyDuration(callback_data.duration)
     data = await state.get_data()
     proxies = data.get("proxies", [])
-    resource = data.get("add_resource", "unknown")
+    selected_resources = data.get("selected_resources", [])
+    proxy_type = data.get("proxy_type", "http")
 
     # Показываем статус
     await callback.message.edit_text(
@@ -160,11 +230,12 @@ async def add_proxy_duration(
     )
 
     try:
-        # Добавляем прокси
+        # Добавляем прокси с новыми параметрами
         results = await get_proxy_service().add_proxies(
             proxies=proxies,
-            resource=resource,
+            resources=selected_resources,
             duration_days=duration.days,
+            proxy_type=proxy_type,
         )
 
         # Формируем отчёт
@@ -381,13 +452,22 @@ async def proxy_select(
             used_for_names.append(r)
     used_for_text = ", ".join(used_for_names) if used_for_names else "—"
 
+    # Получаем оба формата прокси (HTTP и SOCKS5)
+    http_proxy = proxy.get_http_proxy()
+    socks5_proxy = proxy.get_socks5_proxy()
+
+    # Определяем тип для отображения
+    proxy_type_display = "HTTP" if proxy.proxy_type == "http" else "SOCKS5"
+
     await callback.message.edit_text(
         f"✅ <b>Прокси получен</b>\n\n"
         f"Ресурс: {resource_obj.display_name}\n"
         f"Страна: {flag} {proxy.country}\n"
+        f"Тип: {proxy_type_display}\n"
         f"Осталось дней: {proxy.days_left}\n"
         f"Использован для: {used_for_text}\n\n"
-        f"<pre>{proxy.proxy}</pre>",
+        f"<b>HTTP:</b>\n<code>{http_proxy}</code>\n\n"
+        f"<b>SOCKS5:</b>\n<code>{socks5_proxy}</code>",
         parse_mode="HTML",
     )
 
@@ -424,6 +504,19 @@ async def proxy_back_to_menu(callback: CallbackQuery, state: FSMContext):
         "🌐 <b>Прокси</b>\n\n"
         "Выберите действие:",
         reply_markup=get_proxy_menu_keyboard(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(ProxyBackCallback.filter(F.to == "type"))
+async def proxy_back_to_type(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору типа прокси"""
+    await state.set_state(ProxyStates.add_selecting_type)
+    await callback.message.edit_text(
+        "➕ <b>Добавление прокси</b>\n\n"
+        "Выберите тип прокси:",
+        reply_markup=get_proxy_type_keyboard(),
         parse_mode="HTML",
     )
     await callback.answer()

@@ -10,8 +10,11 @@ from bot.keyboards.callbacks import (
     ProxySelectCallback,
     ProxyPageCallback,
     ProxyBackCallback,
+    ProxyTypeCallback,
+    ProxyResourceToggleCallback,
+    ProxyResourceConfirmCallback,
 )
-from bot.models.enums import ProxyResource, ProxyDuration, get_country_flag, get_country_name
+from bot.models.enums import ProxyResource, ProxyDuration, ProxyType, get_country_flag, get_country_name
 from bot.models.proxy import Proxy
 
 # Количество прокси на странице
@@ -166,4 +169,57 @@ def get_proxy_back_keyboard(to: str = "menu") -> InlineKeyboardMarkup:
         callback_data=ProxyBackCallback(to=to),
     )
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_proxy_type_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора типа прокси (HTTP/SOCKS5)"""
+    builder = InlineKeyboardBuilder()
+    for proxy_type in ProxyType:
+        builder.button(
+            text=proxy_type.button_text,
+            callback_data=ProxyTypeCallback(proxy_type=proxy_type.value),
+        )
+    builder.button(
+        text="« Назад",
+        callback_data=ProxyBackCallback(to="menu"),
+    )
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+def get_proxy_resource_multi_keyboard(selected: List[str]) -> InlineKeyboardMarkup:
+    """Клавиатура множественного выбора ресурсов для прокси"""
+    builder = InlineKeyboardBuilder()
+
+    for resource in ProxyResource:
+        # Добавляем галочку если ресурс выбран
+        check = "✅ " if resource.value in selected else ""
+        builder.button(
+            text=f"{check}{resource.button_text}",
+            callback_data=ProxyResourceToggleCallback(resource=resource.value),
+        )
+
+    # Кнопка подтвердить (только если что-то выбрано)
+    if selected:
+        builder.button(
+            text="✔️ Подтвердить",
+            callback_data=ProxyResourceConfirmCallback(),
+        )
+
+    # Кнопка назад
+    builder.button(
+        text="« Назад",
+        callback_data=ProxyBackCallback(to="type"),
+    )
+
+    # Раскладка: ресурсы по 2 в ряд, затем кнопки подтвердить и назад
+    rows = [2] * (len(ProxyResource) // 2)
+    if len(ProxyResource) % 2:
+        rows.append(1)
+    if selected:
+        rows.append(1)  # Кнопка подтвердить
+    rows.append(1)  # Кнопка назад
+
+    builder.adjust(*rows)
     return builder.as_markup()

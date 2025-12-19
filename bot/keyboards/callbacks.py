@@ -85,6 +85,13 @@ class StatBackCallback(CallbackData, prefix="stat_back"):
     to: str  # resource, gender, region, period
 
 
+class StatDetailedByRegionsCallback(CallbackData, prefix="stat_det"):
+    """Callback для детальной статистики по регионам"""
+    resource: str
+    gender: str
+    period: str
+
+
 # === Прокси ===
 
 class ProxyMenuCallback(CallbackData, prefix="prx_menu"):
@@ -122,3 +129,60 @@ class ProxyPageCallback(CallbackData, prefix="prx_page"):
 class ProxyBackCallback(CallbackData, prefix="prx_back"):
     """Callback для кнопки назад в прокси"""
     to: str  # menu, resource, country
+
+
+class ProxyTypeCallback(CallbackData, prefix="prx_type"):
+    """Callback для выбора типа прокси"""
+    proxy_type: str  # http или socks5
+
+
+class ProxyResourceToggleCallback(CallbackData, prefix="prx_tog"):
+    """Toggle выбора ресурса для прокси (множественный выбор)"""
+    resource: str
+
+
+class ProxyResourceConfirmCallback(CallbackData, prefix="prx_conf"):
+    """Подтверждение выбора ресурсов"""
+    pass
+
+
+# === Номера ===
+
+class NumberMenuCallback(CallbackData, prefix="num_menu"):
+    """Callback для открытия меню номеров"""
+    action: str  # open
+
+
+class NumberResourceToggleCallback(CallbackData, prefix="num_tog"):
+    """Toggle выбора ресурса для номеров (множественный выбор)"""
+    resource: str  # beboo, loloo, tabor
+
+
+class NumberResourceConfirmCallback(CallbackData, prefix="num_conf"):
+    """Подтверждение выбора ресурсов номеров"""
+    pass
+
+
+class NumberRegionCallback(CallbackData, prefix="num_reg"):
+    """Callback для выбора региона для номеров"""
+    region: str
+
+
+class NumberSearchRegionCallback(CallbackData, prefix="num_search"):
+    """Callback для поиска региона в номерах"""
+    pass
+
+
+class NumberQuantityCallback(CallbackData, prefix="num_qty"):
+    """Callback для выбора количества номеров"""
+    quantity: int
+
+
+class NumberBackCallback(CallbackData, prefix="num_back"):
+    """Callback для кнопки назад в номерах"""
+    to: str  # resources, region
+
+
+class NumberTodayModeCallback(CallbackData, prefix="num_mode"):
+    """Callback для переключения режима today_only"""
+    action: str  # enable, disable

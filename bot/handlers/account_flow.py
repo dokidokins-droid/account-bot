@@ -36,6 +36,7 @@ async def process_resource(
     state: FSMContext,
 ):
     """Обработка выбора ресурса"""
+    await callback.answer()
     resource = Resource(callback_data.resource)
 
     await state.update_data(resource=resource)
@@ -47,7 +48,6 @@ async def process_resource(
         reply_markup=get_region_keyboard(),
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(RegionCallback.filter(), AccountFlowStates.selecting_region)
@@ -57,6 +57,7 @@ async def process_region(
     state: FSMContext,
 ):
     """Обработка выбора региона"""
+    await callback.answer()
     region = callback_data.region
     data = await state.get_data()
     resource = data["resource"]
@@ -71,12 +72,12 @@ async def process_region(
         reply_markup=get_quantity_keyboard(),
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(SearchRegionCallback.filter(), AccountFlowStates.selecting_region)
 async def search_region_start(callback: CallbackQuery, state: FSMContext):
     """Начало поиска региона"""
+    await callback.answer()
     from bot.keyboards.inline import get_back_to_region_keyboard
 
     data = await state.get_data()
@@ -89,20 +90,14 @@ async def search_region_start(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_back_to_region_keyboard(),
         parse_mode="HTML",
     )
-    await callback.answer()
+
+
+from bot.services.region_service import region_service
 
 
 def is_valid_region(region: str) -> bool:
-    """Проверка валидности кода региона РФ"""
-    # Убираем пробелы и проверяем что это число
-    region = region.strip()
-    if not region.isdigit():
-        return False
-
-    code = int(region)
-    # Валидные коды регионов РФ: 01-99 и трёхзначные (102, 116, 152, 190-199, 716, 750, 777, 799 и т.д.)
-    # Упрощённая проверка: от 1 до 999
-    return 1 <= code <= 999
+    """Проверка существования региона в системе"""
+    return region_service.region_exists(region)
 
 
 @router.message(AccountFlowStates.searching_region)
@@ -123,9 +118,11 @@ async def search_region_input(message: Message, state: FSMContext):
 
     # Валидация региона
     if not is_valid_region(region):
+        available = ", ".join(region_service.get_regions()[:5])
         await message.answer(
-            f"❌ Неверный формат региона: <b>{region}</b>\n\n"
-            f"Введите числовой код региона (например: 77, 50, 197):",
+            f"❌ Такого региона не существует: <b>{region}</b>\n\n"
+            f"Доступные регионы: {available}...\n"
+            f"Введите существующий регион или выберите из списка:",
             reply_markup=get_back_to_region_keyboard(),
             parse_mode="HTML",
         )
@@ -151,6 +148,7 @@ async def process_quantity(
     state: FSMContext,
 ):
     """Обработка выбора количества"""
+    await callback.answer()
     quantity = callback_data.quantity
     data = await state.get_data()
     resource = data["resource"]
@@ -167,7 +165,6 @@ async def process_quantity(
         reply_markup=get_gender_keyboard(resource),
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(GenderCallback.filter(), AccountFlowStates.selecting_gender)
@@ -220,7 +217,6 @@ async def process_gender_and_issue(
                 "Выберите ресурс:",
                 reply_markup=get_resource_keyboard(),
             )
-            await callback.answer()
             return
 
         # Обновляем сводку
@@ -278,17 +274,18 @@ async def process_gender_and_issue(
 @router.callback_query(BackCallback.filter(F.to == "resource"))
 async def back_to_resource(callback: CallbackQuery, state: FSMContext):
     """Возврат к выбору ресурса"""
+    await callback.answer()
     await state.set_state(AccountFlowStates.selecting_resource)
     await callback.message.edit_text(
         "Выберите ресурс:",
         reply_markup=get_resource_keyboard(),
     )
-    await callback.answer()
 
 
 @router.callback_query(BackCallback.filter(F.to == "region"))
 async def back_to_region(callback: CallbackQuery, state: FSMContext):
     """Возврат к выбору региона"""
+    await callback.answer()
     data = await state.get_data()
     resource = data.get("resource")
 
@@ -306,12 +303,12 @@ async def back_to_region(callback: CallbackQuery, state: FSMContext):
             reply_markup=get_region_keyboard(),
             parse_mode="HTML",
         )
-    await callback.answer()
 
 
 @router.callback_query(BackCallback.filter(F.to == "region"), AccountFlowStates.searching_region)
 async def back_to_region_from_search(callback: CallbackQuery, state: FSMContext):
     """Возврат к выбору региона из режима поиска"""
+    await callback.answer()
     data = await state.get_data()
     resource = data.get("resource")
 
@@ -322,12 +319,12 @@ async def back_to_region_from_search(callback: CallbackQuery, state: FSMContext)
         reply_markup=get_region_keyboard(),
         parse_mode="HTML",
     )
-    await callback.answer()
 
 
 @router.callback_query(BackCallback.filter(F.to == "quantity"))
 async def back_to_quantity(callback: CallbackQuery, state: FSMContext):
     """Возврат к выбору количества"""
+    await callback.answer()
     data = await state.get_data()
     resource = data.get("resource")
     region = data.get("region")
@@ -347,4 +344,3 @@ async def back_to_quantity(callback: CallbackQuery, state: FSMContext):
             reply_markup=get_quantity_keyboard(),
             parse_mode="HTML",
         )
-    await callback.answer()
