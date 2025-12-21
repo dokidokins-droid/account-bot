@@ -5,7 +5,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery, TelegramObject
 from aiogram.fsm.context import FSMContext
 
-from bot.services.sheets_service import sheets_service
+from bot.services.whitelist_service import whitelist_service
 from bot.states.states import RegistrationStates
 from bot.config import settings
 
@@ -53,7 +53,7 @@ class WhitelistMiddleware(BaseMiddleware):
 
         if user_id:
             try:
-                user = await sheets_service.get_user_by_telegram_id(user_id)
+                user = whitelist_service.get_user(user_id)
 
                 if not user or not user.is_approved:
                     # Пользователь не авторизован

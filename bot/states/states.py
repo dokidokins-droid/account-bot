@@ -18,11 +18,32 @@ class AccountFlowStates(StatesGroup):
 
 class StatisticStates(StatesGroup):
     """Состояния просмотра статистики"""
+    # Основные аккаунты (VK, Mamba, OK)
     selecting_resource = State()  # Выбор ресурса
     selecting_gender = State()  # Выбор пола/типа
     selecting_region = State()  # Выбор региона (+ все регионы)
     searching_region = State()  # Ручной ввод региона
     selecting_period = State()  # Выбор периода (день/неделя/месяц)
+
+    # Почты (Gmail, Rambler)
+    email_selecting_resource = State()  # Выбор почтового ресурса
+    email_selecting_type = State()  # Выбор типа Gmail (Обычные/gmail.com)
+    email_selecting_region = State()  # Выбор региона для почт
+    email_searching_region = State()  # Ручной ввод региона для почт
+    email_selecting_period = State()  # Выбор периода для почт
+
+    # Номера
+    number_selecting_region = State()  # Выбор региона для номеров
+    number_searching_region = State()  # Ручной ввод региона для номеров
+    number_selecting_period = State()  # Выбор периода для номеров
+
+
+class BufferClearStates(StatesGroup):
+    """Состояния для очистки буфера (админ)"""
+    selecting_category = State()  # Аккаунты / Почты / Всё
+    selecting_resource = State()  # Конкретный ресурс
+    selecting_type = State()  # available / pending / buffer / all
+    confirming = State()  # Подтверждение
 
 
 class ProxyStates(StatesGroup):
@@ -40,6 +61,7 @@ class ProxyStates(StatesGroup):
     get_selecting_resource = State()  # Выбор ресурса
     get_selecting_country = State()  # Выбор страны (сетка с флагами)
     get_selecting_proxy = State()  # Выбор конкретного прокси (с пагинацией)
+    get_multiselecting = State()  # Множественный выбор прокси (с чекбоксами)
 
 
 class NumberStates(StatesGroup):
@@ -47,4 +69,13 @@ class NumberStates(StatesGroup):
     selecting_resources = State()  # Множественный выбор ресурсов (Beboo/Loloo/Табор)
     selecting_region = State()  # Выбор региона
     searching_region = State()  # Ручной ввод региона
+    selecting_quantity = State()  # Выбор количества (1-5)
+
+
+class EmailFlowStates(StatesGroup):
+    """Состояния процесса выдачи почт"""
+    selecting_email_resource = State()  # Выбор почтового ресурса (Gmail/Рамблер)
+    selecting_email_type = State()  # Выбор типа (только для Gmail: Обычные/gmail.com)
+    selecting_region = State()  # Выбор региона
+    searching_region = State()  # Поиск региона (ввод текста)
     selecting_quantity = State()  # Выбор количества (1-5)

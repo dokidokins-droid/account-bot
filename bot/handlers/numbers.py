@@ -14,18 +14,23 @@ from bot.keyboards.callbacks import (
     NumberSearchRegionCallback,
     NumberQuantityCallback,
     NumberBackCallback,
+    NumberFeedbackCallback,
+    NumberReplaceCallback,
 )
 from bot.keyboards.number_keyboards import (
     get_number_resource_keyboard,
     get_number_region_keyboard,
     get_number_back_to_region_keyboard,
     get_number_quantity_keyboard,
+    get_number_feedback_keyboard,
+    get_number_replace_keyboard,
 )
 from bot.keyboards.inline import get_resource_keyboard
 from bot.models.enums import NumberResource
 from bot.services.number_service import number_service
 from bot.services.region_service import region_service
-from bot.services.sheets_service import sheets_service
+from bot.services.whitelist_service import whitelist_service
+from bot.utils.formatters import format_number_message, make_compact_after_feedback
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -231,11 +236,8 @@ async def select_number_quantity_and_issue(
     )
 
     # Получаем stage пользователя
-    try:
-        user = await sheets_service.get_user_by_telegram_id(callback.from_user.id)
-        employee_stage = user.stage if user else "unknown"
-    except Exception:
-        employee_stage = "unknown"
+    user = whitelist_service.get_user(callback.from_user.id)
+    employee_stage = user.stage if user else "unknown"
 
     try:
         # Выдаём номера
@@ -254,8 +256,10 @@ async def select_number_quantity_and_issue(
             )
             await state.clear()
             await callback.message.answer(
+                "📦 <b>Выдача аккаунтов</b>\n\n"
                 "Выберите ресурс:",
                 reply_markup=get_resource_keyboard(),
+                parse_mode="HTML",
             )
             return
 
@@ -267,15 +271,20 @@ async def select_number_quantity_and_issue(
             parse_mode="HTML",
         )
 
-        # Отправляем каждый номер отдельным сообщением
+        # Отправляем каждый номер отдельным сообщением с клавиатурой фидбека
         for item in issued:
             number = item["number"]
             date_added = item.get("date_added", "")
 
+            msg = format_number_message(number, date_added, resources_text)
             await callback.message.answer(
-                f"📱 <code>{number}</code>\n\n"
-                f"<i>Добавлен: {date_added}</i>",
+                msg,
                 parse_mode="HTML",
+                reply_markup=get_number_feedback_keyboard(
+                    number_id=number,  # Передаём сам номер телефона
+                    resources=resources_text,
+                    region=region,
+                ),
             )
 
         # Предлагаем продолжить
@@ -292,11 +301,133 @@ async def select_number_quantity_and_issue(
             "Попробуйте позже."
         )
         await callback.message.answer(
+            "📦 <b>Выдача аккаунтов</b>\n\n"
             "Выберите ресурс:",
             reply_markup=get_resource_keyboard(),
+            parse_mode="HTML",
         )
 
     await state.clear()
+
+
+# === Обработка фидбека по номерам ===
+
+@router.callback_query(NumberFeedbackCallback.filter())
+async def process_number_feedback(
+    callback: CallbackQuery,
+    callback_data: NumberFeedbackCallback,
+):
+    """Обработка feedback по номеру - обновляет статус в таблице Выдачи"""
+    number_id = callback_data.number_id
+    status = callback_data.action
+    resources = callback_data.resources
+    region = callback_data.region
+
+    # Получаем display name статуса
+    from bot.models.enums import NumberStatus
+    try:
+        status_display = NumberStatus(status).display_name
+    except ValueError:
+        status_display = status
+
+    # СРАЗУ отвечаем на callback чтобы не было timeout
+    try:
+        await callback.answer(status_display)
+    except Exception:
+        pass  # Если уже протух - игнорируем
+
+    try:
+        # Компактный формат сообщения
+        new_text = make_compact_after_feedback(callback.message.html_text, status_display)
+
+        # Для всех статусов кроме "working" показываем кнопку замены
+        if status != "working":
+            await callback.message.edit_text(
+                new_text,
+                parse_mode="HTML",
+                reply_markup=get_number_replace_keyboard(resources, region),
+            )
+        else:
+            await callback.message.edit_text(
+                new_text,
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+
+        # Обновляем статус номера в таблице (в фоне, после ответа пользователю)
+        success = await number_service.update_number_status(number_id, status)
+
+        if not success:
+            logger.warning(f"Number {number_id} status update returned False")
+
+    except Exception as e:
+        logger.error(f"Error processing number feedback: {e}")
+
+
+@router.callback_query(NumberReplaceCallback.filter())
+async def process_number_replace(
+    callback: CallbackQuery,
+    callback_data: NumberReplaceCallback,
+):
+    """Обработка замены номера"""
+    await callback.answer("⏳ Ищем замену...")
+
+    resources_text = callback_data.resources
+    region = callback_data.region
+
+    # Преобразуем текст ресурсов обратно в список значений
+    resources = []
+    for name in resources_text.split(", "):
+        for r in NumberResource:
+            if r.display_name == name:
+                resources.append(r.value)
+                break
+
+    if not resources:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("❌ Не удалось определить ресурсы для замены")
+        return
+
+    try:
+        # Получаем stage пользователя
+        user = whitelist_service.get_user(callback.from_user.id)
+        employee_stage = user.stage if user else "unknown"
+
+        # Выдаём один номер на замену
+        issued = await number_service.issue_numbers(
+            resources=resources,
+            region=region,
+            quantity=1,
+            employee_stage=employee_stage,
+        )
+
+        if not issued:
+            await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.message.answer("❌ Номера для замены не найдены")
+            return
+
+        # Отправляем новый номер
+        item = issued[0]
+        number = item["number"]
+        date_added = item.get("date_added", "")
+
+        msg = format_number_message(number, date_added, resources_text)
+        await callback.message.answer(
+            f"🔄 <b>Замена номера:</b>\n\n{msg}",
+            parse_mode="HTML",
+            reply_markup=get_number_feedback_keyboard(
+                number_id=number,  # Передаём сам номер телефона
+                resources=resources_text,
+                region=region,
+            ),
+        )
+
+        # Убираем кнопку замены с предыдущего сообщения
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+    except Exception as e:
+        logger.error(f"Error replacing number: {e}")
+        await callback.message.answer("❌ Ошибка при замене номера")
 
 
 # === Кнопки назад ===
@@ -349,6 +480,8 @@ async def back_to_main_menu(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AccountFlowStates.selecting_resource)
 
     await callback.message.edit_text(
+        "📦 <b>Выдача аккаунтов</b>\n\n"
         "Выберите ресурс:",
         reply_markup=get_resource_keyboard(),
+        parse_mode="HTML",
     )

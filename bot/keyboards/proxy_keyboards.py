@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Set
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup
 
@@ -13,12 +13,14 @@ from bot.keyboards.callbacks import (
     ProxyTypeCallback,
     ProxyResourceToggleCallback,
     ProxyResourceConfirmCallback,
+    ProxyToggleCallback,
+    ProxyConfirmMultiCallback,
 )
 from bot.models.enums import ProxyResource, ProxyDuration, ProxyType, get_country_flag, get_country_name
 from bot.models.proxy import Proxy
 
-# Количество прокси на странице
-PROXIES_PER_PAGE = 6
+# Количество прокси на странице (2x5 сетка)
+PROXIES_PER_PAGE = 10
 
 
 def get_proxy_menu_keyboard() -> InlineKeyboardMarkup:
@@ -222,4 +224,87 @@ def get_proxy_resource_multi_keyboard(selected: List[str]) -> InlineKeyboardMark
     rows.append(1)  # Кнопка назад
 
     builder.adjust(*rows)
+    return builder.as_markup()
+
+
+def get_proxy_list_multi_keyboard(
+    proxies: List[Proxy],
+    country: str,
+    selected_rows: Set[int],
+    total_selected: int = 0,
+    page: int = 0,
+) -> InlineKeyboardMarkup:
+    """
+    Клавиатура списка прокси с множественным выбором.
+
+    Args:
+        proxies: Список доступных прокси (уже отсортированный по days_left DESC)
+        country: Код страны
+        selected_rows: Set индексов выбранных строк (для этой страны)
+        total_selected: Общее количество выбранных прокси (всех стран)
+        page: Текущая страница
+
+    Returns:
+        Клавиатура с флагами/галочками, пагинацией и кнопкой подтверждения
+    """
+    builder = InlineKeyboardBuilder()
+
+    total_pages = (len(proxies) + PROXIES_PER_PAGE - 1) // PROXIES_PER_PAGE
+    start_idx = page * PROXIES_PER_PAGE
+    end_idx = min(start_idx + PROXIES_PER_PAGE, len(proxies))
+
+    page_proxies = proxies[start_idx:end_idx]
+    flag = get_country_flag(country)
+
+    # Кнопки прокси: флаг → галочка при выборе
+    for proxy in page_proxies:
+        is_selected = proxy.row_index in selected_rows
+        icon = "✅" if is_selected else flag
+        text = f"{icon} {proxy.ip_short} ({proxy.days_left}д)"
+        builder.button(
+            text=text,
+            callback_data=ProxyToggleCallback(
+                row_index=proxy.row_index,
+                country=country,
+                page=page
+            ),
+        )
+
+    # По 2 прокси в ряд (сетка 2x5)
+    proxy_rows = [2] * (len(page_proxies) // 2)
+    if len(page_proxies) % 2:
+        proxy_rows.append(1)
+
+    # Кнопка подтверждения (если есть выбранные - показываем общее количество)
+    if total_selected > 0:
+        builder.button(
+            text=f"✔️ Подтвердить ({total_selected})",
+            callback_data=ProxyConfirmMultiCallback(country=country),
+        )
+        proxy_rows.append(1)
+
+    # Пагинация
+    pagination_buttons = []
+    if page > 0:
+        pagination_buttons.append(("« Пред", page - 1))
+    if page < total_pages - 1:
+        pagination_buttons.append(("След »", page + 1))
+
+    for text, pg in pagination_buttons:
+        builder.button(
+            text=text,
+            callback_data=ProxyPageCallback(page=pg, country=country),
+        )
+
+    if pagination_buttons:
+        proxy_rows.append(len(pagination_buttons))
+
+    # Кнопка назад к странам
+    builder.button(
+        text="« К странам",
+        callback_data=ProxyBackCallback(to="country"),
+    )
+    proxy_rows.append(1)
+
+    builder.adjust(*proxy_rows)
     return builder.as_markup()

@@ -69,6 +69,9 @@ class AccountCache:
         # Буфер записи {key: list of ConfirmedAccount}
         self._write_buffer: Dict[str, List[ConfirmedAccount]] = {}
 
+        # Мета-блокировка для создания других блокировок (fix race condition)
+        self._meta_lock = asyncio.Lock()
+
         # Блокировки
         self._load_locks: Dict[str, asyncio.Lock] = {}
         self._issue_locks: Dict[str, asyncio.Lock] = {}
@@ -82,10 +85,12 @@ class AccountCache:
     def _get_key(self, resource: Resource, gender: Gender) -> str:
         return f"{resource.value}_{gender.value}"
 
-    def _get_lock(self, locks_dict: Dict[str, asyncio.Lock], key: str) -> asyncio.Lock:
-        if key not in locks_dict:
-            locks_dict[key] = asyncio.Lock()
-        return locks_dict[key]
+    async def _get_lock(self, locks_dict: Dict[str, asyncio.Lock], key: str) -> asyncio.Lock:
+        """Потокобезопасное получение блокировки для ключа"""
+        async with self._meta_lock:
+            if key not in locks_dict:
+                locks_dict[key] = asyncio.Lock()
+            return locks_dict[key]
 
     def _get_available_count(self, key: str) -> int:
         """Количество доступных для выдачи (не pending)"""
@@ -107,7 +112,7 @@ class AccountCache:
             logger.debug(f"Skipping load for {key}: already have {current_available} available")
             return 0
 
-        load_lock = self._get_lock(self._load_locks, key)
+        load_lock = await self._get_lock(self._load_locks, key)
 
         if self._loading.get(key):
             return 0
@@ -164,7 +169,7 @@ class AccountCache:
     ) -> List[Dict[str, Any]]:
         """Получить аккаунты мгновенно из кэша"""
         key = self._get_key(resource, gender)
-        issue_lock = self._get_lock(self._issue_locks, key)
+        issue_lock = await self._get_lock(self._issue_locks, key)
 
         async with issue_lock:
             available = self._available.get(key, deque())
@@ -539,9 +544,11 @@ class AccountCache:
         for resource in Resource:
             for gender in Gender:
                 # Пропускаем неподходящие комбинации
-                if resource == Resource.GMAIL and gender in (Gender.MALE, Gender.FEMALE):
+                if resource == Resource.GMAIL and gender in (Gender.MALE, Gender.FEMALE, Gender.NONE):
                     continue
-                if resource != Resource.GMAIL and gender in (Gender.ANY, Gender.GMAIL_DOMAIN):
+                if resource in (Resource.VK, Resource.OK) and gender != Gender.NONE:
+                    continue
+                if resource == Resource.MAMBA and gender in (Gender.ANY, Gender.GMAIL_DOMAIN, Gender.NONE):
                     continue
 
                 key = self._get_key(resource, gender)
@@ -576,6 +583,58 @@ class AccountCache:
                 "write_buffer": len(self._write_buffer.get(key, [])),
             }
         return stats
+
+    def clear_cache(self, key: str = None, clear_type: str = "all") -> Dict[str, int]:
+        """
+        Очистить кэш.
+
+        Args:
+            key: Ключ ресурса (например "vk_none") или None для всех
+            clear_type: Что очищать - "available", "pending", "write_buffer" или "all"
+
+        Returns:
+            Словарь с количеством удалённых элементов по каждому типу
+        """
+        cleared = {"available": 0, "pending": 0, "write_buffer": 0}
+
+        if clear_type in ("available", "all"):
+            if key:
+                if key in self._available:
+                    cleared["available"] = len(self._available[key])
+                    self._available[key] = deque()
+            else:
+                for k in list(self._available.keys()):
+                    cleared["available"] += len(self._available[k])
+                    self._available[k] = deque()
+
+        if clear_type in ("pending", "all"):
+            if key:
+                to_remove = [
+                    acc_id for acc_id, p in self._pending.items()
+                    if self._get_key(p.resource, p.gender) == key
+                ]
+                for acc_id in to_remove:
+                    del self._pending[acc_id]
+                cleared["pending"] = len(to_remove)
+            else:
+                cleared["pending"] = len(self._pending)
+                self._pending.clear()
+
+        if clear_type in ("write_buffer", "all"):
+            if key:
+                if key in self._write_buffer:
+                    cleared["write_buffer"] = len(self._write_buffer[key])
+                    self._write_buffer[key] = []
+            else:
+                for k in list(self._write_buffer.keys()):
+                    cleared["write_buffer"] += len(self._write_buffer[k])
+                    self._write_buffer[k] = []
+
+        # Сохраняем состояние после очистки
+        self.save_state()
+        logger.info(f"Cache cleared: key={key}, type={clear_type}, cleared={cleared}")
+
+        return cleared
 
 
 # Глобальный кэш

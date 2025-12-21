@@ -12,8 +12,10 @@ from bot.keyboards.callbacks import (
     NumberQuantityCallback,
     NumberBackCallback,
     NumberTodayModeCallback,
+    NumberFeedbackCallback,
+    NumberReplaceCallback,
 )
-from bot.models.enums import NumberResource
+from bot.models.enums import NumberResource, NumberStatus
 from bot.services.region_service import region_service
 
 
@@ -125,5 +127,36 @@ def get_number_today_mode_keyboard(today_only: bool) -> InlineKeyboardMarkup:
             callback_data=NumberTodayModeCallback(action="enable"),
         )
 
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_number_feedback_keyboard(number_id: str, resources: str, region: str) -> InlineKeyboardMarkup:
+    """Клавиатура фидбека по номеру"""
+    builder = InlineKeyboardBuilder()
+
+    for status in NumberStatus:
+        builder.button(
+            text=status.display_name,
+            callback_data=NumberFeedbackCallback(
+                action=status.value,
+                number_id=number_id,
+                resources=resources,
+                region=region,
+            ),
+        )
+
+    # Layout: 4 кнопки в 2 ряда по 2
+    builder.adjust(2, 2)
+    return builder.as_markup()
+
+
+def get_number_replace_keyboard(resources: str, region: str) -> InlineKeyboardMarkup:
+    """Клавиатура с кнопкой замены номера"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔄 Заменить",
+        callback_data=NumberReplaceCallback(resources=resources, region=region),
+    )
     builder.adjust(1)
     return builder.as_markup()

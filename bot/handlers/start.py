@@ -6,8 +6,7 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 
 from bot.states.states import RegistrationStates, AccountFlowStates
-from bot.services.sheets_service import sheets_service
-from bot.services.fallback_storage import fallback_storage
+from bot.services.whitelist_service import whitelist_service
 from bot.keyboards.inline import get_resource_keyboard, get_admin_approval_keyboard
 from bot.utils.formatters import format_user_request
 from bot.models.user import User
@@ -24,15 +23,17 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 
     try:
         # Проверяем, есть ли пользователь в whitelist
-        user = await sheets_service.get_user_by_telegram_id(user_id)
+        user = whitelist_service.get_user(user_id)
 
         if user and user.is_approved:
             # Пользователь одобрен - показываем главное меню
             await state.clear()
             await state.set_state(AccountFlowStates.selecting_resource)
             await message.answer(
+                "📦 <b>Выдача аккаунтов</b>\n\n"
                 "Выберите ресурс:",
                 reply_markup=get_resource_keyboard(),
+                parse_mode="HTML",
             )
         elif user and not user.is_approved:
             # Пользователь ожидает одобрения
@@ -68,35 +69,32 @@ async def process_stage(message: Message, state: FSMContext, bot: Bot):
 
     user_id = message.from_user.id
 
-    try:
-        # Проверяем, не существует ли уже пользователь
-        existing = await sheets_service.get_user_by_telegram_id(user_id)
-        if existing:
-            if existing.is_approved:
-                await state.clear()
-                await state.set_state(AccountFlowStates.selecting_resource)
-                await message.answer(
-                    "Вы уже зарегистрированы! Выберите ресурс:",
-                    reply_markup=get_resource_keyboard(),
-                )
-            else:
-                await state.set_state(RegistrationStates.waiting_for_approval)
-                await message.answer(
-                    "⏳ Ваша заявка уже отправлена. Ожидайте одобрения."
-                )
-            return
+    # Проверяем, не существует ли уже пользователь
+    existing = whitelist_service.get_user(user_id)
+    if existing:
+        if existing.is_approved:
+            await state.clear()
+            await state.set_state(AccountFlowStates.selecting_resource)
+            await message.answer(
+                "📦 <b>Выдача аккаунтов</b>\n\n"
+                "Вы уже зарегистрированы! Выберите ресурс:",
+                reply_markup=get_resource_keyboard(),
+                parse_mode="HTML",
+            )
+        else:
+            await state.set_state(RegistrationStates.waiting_for_approval)
+            await message.answer(
+                "⏳ Ваша заявка уже отправлена. Ожидайте одобрения."
+            )
+        return
 
-        # Сохраняем пользователя в whitelist
-        new_user = User(
-            telegram_id=user_id,
-            stage=stage,
-            is_approved=False,
-        )
-        await sheets_service.add_user_to_whitelist(new_user)
-
-    except Exception as e:
-        logger.error(f"Error saving user to sheets, using fallback: {e}")
-        await fallback_storage.add_pending_user(user_id, stage)
+    # Сохраняем пользователя в whitelist
+    new_user = User(
+        telegram_id=user_id,
+        stage=stage,
+        is_approved=False,
+    )
+    whitelist_service.add_user(new_user)
 
     # Отправляем запрос админу
     admin_notified = False

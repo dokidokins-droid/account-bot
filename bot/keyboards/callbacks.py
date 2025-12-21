@@ -56,8 +56,23 @@ class ReplaceAccountCallback(CallbackData, prefix="repl"):
 # === Статистика ===
 
 class StatResourceCallback(CallbackData, prefix="stat_res"):
-    """Callback для выбора ресурса в статистике"""
+    """Callback для выбора ресурса в статистике (VK, Mamba, OK)"""
     resource: str
+
+
+class StatEmailMenuCallback(CallbackData, prefix="stat_email"):
+    """Callback для открытия раздела почт в статистике"""
+    action: str  # open
+
+
+class StatEmailResourceCallback(CallbackData, prefix="stat_em_res"):
+    """Callback для выбора почтового ресурса в статистике (Gmail/Rambler)"""
+    resource: str  # gmail, rambler
+
+
+class StatNumberMenuCallback(CallbackData, prefix="stat_num"):
+    """Callback для открытия раздела номеров в статистике"""
+    action: str  # open
 
 
 class StatGenderCallback(CallbackData, prefix="stat_gen"):
@@ -146,6 +161,18 @@ class ProxyResourceConfirmCallback(CallbackData, prefix="prx_conf"):
     pass
 
 
+class ProxyToggleCallback(CallbackData, prefix="prx_tgl"):
+    """Toggle выбора прокси для множественного выбора"""
+    row_index: int
+    country: str
+    page: int = 0
+
+
+class ProxyConfirmMultiCallback(CallbackData, prefix="prx_cfm"):
+    """Подтверждение выбора нескольких прокси"""
+    country: str
+
+
 # === Номера ===
 
 class NumberMenuCallback(CallbackData, prefix="num_menu"):
@@ -186,3 +213,97 @@ class NumberBackCallback(CallbackData, prefix="num_back"):
 class NumberTodayModeCallback(CallbackData, prefix="num_mode"):
     """Callback для переключения режима today_only"""
     action: str  # enable, disable
+
+
+class NumberFeedbackCallback(CallbackData, prefix="num_fb"):
+    """Callback для фидбека по номеру"""
+    action: str  # working, reset, registered, tg_kicked
+    number_id: str  # Уникальный ID записи (row_index из таблицы Выдачи)
+    resources: str  # Ресурсы через запятую (для отображения)
+    region: str  # Регион для замены
+
+
+class NumberReplaceCallback(CallbackData, prefix="num_repl"):
+    """Callback для замены номера"""
+    resources: str  # Ресурсы через запятую
+    region: str
+
+
+# === Почты ===
+
+class EmailMenuCallback(CallbackData, prefix="email_menu"):
+    """Callback для открытия меню почт"""
+    action: str  # open
+
+
+class EmailResourceCallback(CallbackData, prefix="email_res"):
+    """Callback для выбора почтового ресурса"""
+    resource: str  # gmail, rambler
+
+
+class EmailTypeCallback(CallbackData, prefix="email_type"):
+    """Callback для выбора типа Gmail (Обычные/gmail.com)"""
+    email_type: str  # any, gmail_domain
+
+
+class EmailRegionCallback(CallbackData, prefix="email_reg"):
+    """Callback для выбора региона для почт"""
+    region: str
+
+
+class EmailSearchRegionCallback(CallbackData, prefix="email_search"):
+    """Callback для поиска региона в почтах"""
+    pass
+
+
+class EmailQuantityCallback(CallbackData, prefix="email_qty"):
+    """Callback для выбора количества почт"""
+    quantity: int
+
+
+class EmailBackCallback(CallbackData, prefix="email_back"):
+    """Callback для кнопки назад в почтах"""
+    to: str  # main, email_resource, email_type, region
+
+
+class EmailFeedbackCallback(CallbackData, prefix="email_fb"):
+    """Callback для фидбека по почте"""
+    action: str  # block, good, defect
+    email_id: str  # Уникальный ID записи
+    resource: str  # gmail, rambler
+    email_type: str  # any, gmail_domain, none
+    region: str
+
+
+class EmailReplaceCallback(CallbackData, prefix="email_repl"):
+    """Callback для замены почты"""
+    resource: str
+    email_type: str
+    region: str
+
+
+# === Очистка буфера (админ) ===
+
+class BufferClearCategoryCallback(CallbackData, prefix="buf_cat"):
+    """Callback для выбора категории очистки"""
+    category: str  # accounts, emails, all
+
+
+class BufferClearResourceCallback(CallbackData, prefix="buf_res"):
+    """Callback для выбора ресурса очистки"""
+    resource: str  # vk, mamba_male, mamba_female, ok, gmail_any, gmail_domain, rambler, all_accounts, all_emails
+
+
+class BufferClearTypeCallback(CallbackData, prefix="buf_type"):
+    """Callback для выбора типа очистки"""
+    clear_type: str  # available, pending, write_buffer, all
+
+
+class BufferClearConfirmCallback(CallbackData, prefix="buf_conf"):
+    """Callback для подтверждения очистки"""
+    action: str  # confirm, cancel
+
+
+class BufferClearBackCallback(CallbackData, prefix="buf_back"):
+    """Callback для кнопки назад в очистке буфера"""
+    to: str  # category, resource, type

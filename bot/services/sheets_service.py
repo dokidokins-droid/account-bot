@@ -1,3 +1,4 @@
+import asyncio
 import json
 import base64
 import logging
@@ -11,13 +12,79 @@ from google.oauth2.service_account import Credentials
 
 from bot.config import settings
 from bot.models.account import VKAccount, MambaAccount, OKAccount, GmailAccount
-from bot.models.user import User
-from bot.models.enums import Resource, Gender
+from bot.models.enums import Resource, Gender, EmailResource, NumberResource
 
 logger = logging.getLogger(__name__)
 
-# Время жизни кэша пользователей (5 минут)
-USER_CACHE_TTL = 300
+
+# ==================== RATE LIMITER ====================
+
+class SheetsRateLimiter:
+    """
+    Rate limiter для Google Sheets API.
+
+    Лимиты API:
+    - 100 запросов за 100 секунд на пользователя
+    - 500 запросов за 100 секунд на проект
+
+    Стратегия:
+    - Семафор ограничивает параллельные запросы
+    - Token bucket для контроля частоты
+    """
+
+    def __init__(
+        self,
+        max_concurrent: int = 10,     # Макс параллельных запросов
+        requests_per_second: float = 1.5,  # ~90 запросов в 60 сек (лимит 100/100сек)
+    ):
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._min_interval = 1.0 / requests_per_second
+        self._last_request_time = 0.0
+        self._lock = asyncio.Lock()
+
+        # Статистика
+        self._total_requests = 0
+        self._total_wait_time = 0.0
+
+    async def acquire(self) -> None:
+        """Получить разрешение на запрос"""
+        await self._semaphore.acquire()
+
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_request_time
+
+            if elapsed < self._min_interval:
+                wait_time = self._min_interval - elapsed
+                self._total_wait_time += wait_time
+                await asyncio.sleep(wait_time)
+
+            self._last_request_time = time.monotonic()
+            self._total_requests += 1
+
+    def release(self) -> None:
+        """Освободить слот"""
+        self._semaphore.release()
+
+    async def __aenter__(self):
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+        return False
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Получить статистику"""
+        return {
+            "total_requests": self._total_requests,
+            "total_wait_time": round(self._total_wait_time, 2),
+            "avg_wait_time": round(self._total_wait_time / max(1, self._total_requests), 3),
+        }
+
+
+# Глобальный rate limiter (один на всё приложение)
+sheets_rate_limiter = SheetsRateLimiter()
 
 
 def parse_date(date_str: str) -> datetime:
@@ -46,6 +113,21 @@ class AccountStatistics:
     block: int = 0
     defect: int = 0
     no_status: int = 0  # без статуса (пустой)
+
+
+@dataclass
+class NumberStatistics:
+    """Статистика по номерам телефонов"""
+    total: int = 0  # Всего номеров
+    beboo: int = 0  # Сколько зарегано Beboo
+    loloo: int = 0  # Сколько зарегано Loloo
+    tabor: int = 0  # Сколько зарегано Tabor
+    # Статусы
+    working: int = 0
+    reset: int = 0
+    registered: int = 0
+    tg_kicked: int = 0
+    no_status: int = 0
 
 
 def get_creds():
@@ -79,12 +161,44 @@ def get_creds():
 agcm = gspread_asyncio.AsyncioGspreadClientManager(get_creds)
 
 
+# ==================== RATE-LIMITED WRAPPERS ====================
+
+async def rate_limited_call(coro):
+    """Обёртка для rate-limited вызова API"""
+    async with sheets_rate_limiter:
+        return await coro
+
+
+async def batch_update_cells(worksheet, updates: List[Dict[str, Any]]) -> None:
+    """
+    Batch обновление ячеек за один API запрос.
+
+    Args:
+        worksheet: gspread worksheet
+        updates: список {"row": int, "col": int, "value": str}
+    """
+    if not updates:
+        return
+
+    # Группируем обновления по диапазонам для batch_update
+    cells_data = []
+    for upd in updates:
+        row, col, value = upd["row"], upd["col"], upd["value"]
+        # Конвертируем в A1 нотацию
+        col_letter = chr(ord('A') + col - 1) if col <= 26 else 'Z'
+        cell_range = f"{col_letter}{row}"
+        cells_data.append({
+            "range": cell_range,
+            "values": [[value]]
+        })
+
+    if cells_data:
+        async with sheets_rate_limiter:
+            await worksheet.batch_update(cells_data, value_input_option="USER_ENTERED")
+
+
 class SheetsService:
     """Сервис для работы с Google Sheets"""
-
-    def __init__(self):
-        # Кэш пользователей: {telegram_id: (User, timestamp)}
-        self._user_cache: Dict[int, tuple[Optional[User], float]] = {}
 
     def _get_sheet_name(self, resource: Resource, gender: Gender) -> str:
         """Получить название листа по ресурсу и полу"""
@@ -92,127 +206,9 @@ class SheetsService:
         return settings.SHEET_NAMES.get(key, key)
 
     async def _get_client(self):
-        """Получение авторизованного клиента"""
-        return await agcm.authorize()
-
-    def _invalidate_user_cache(self, telegram_id: int) -> None:
-        """Инвалидировать кэш пользователя"""
-        if telegram_id in self._user_cache:
-            del self._user_cache[telegram_id]
-        logger.debug(f"User cache invalidated for {telegram_id}")
-
-    def _get_cached_user(self, telegram_id: int) -> tuple[Optional[User], bool]:
-        """Получить пользователя из кэша. Возвращает (user, found_in_cache)"""
-        if telegram_id in self._user_cache:
-            user, timestamp = self._user_cache[telegram_id]
-            if time.time() - timestamp < USER_CACHE_TTL:
-                logger.debug(f"User {telegram_id} found in cache")
-                return user, True
-            # Кэш устарел
-            del self._user_cache[telegram_id]
-        return None, False
-
-    def _cache_user(self, telegram_id: int, user: Optional[User]) -> None:
-        """Сохранить пользователя в кэш"""
-        self._user_cache[telegram_id] = (user, time.time())
-        logger.debug(f"User {telegram_id} cached")
-
-    # === Whitelist ===
-
-    async def get_user_by_telegram_id(self, telegram_id: int) -> Optional[User]:
-        """Получить пользователя из whitelist по Telegram ID"""
-        # Проверяем кэш
-        cached_user, found = self._get_cached_user(telegram_id)
-        if found:
-            return cached_user
-
-        try:
-            agc = await self._get_client()
-            ss = await agc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
-            ws = await ss.worksheet(settings.SHEET_NAMES["whitelist"])
-
-            records = await ws.get_all_records()
-            for idx, record in enumerate(records, start=2):
-                if record.get("telegram_id") == telegram_id:
-                    # Правильно парсим is_approved (может быть True/False/TRUE/FALSE/"TRUE"/"FALSE"/1/0)
-                    approved_value = record.get("approved", False)
-                    if isinstance(approved_value, bool):
-                        is_approved = approved_value
-                    elif isinstance(approved_value, str):
-                        is_approved = approved_value.lower() in ("true", "1", "yes")
-                    else:
-                        is_approved = bool(approved_value)
-
-                    user = User(
-                        telegram_id=telegram_id,
-                        stage=record.get("stage", ""),
-                        is_approved=is_approved,
-                        row_index=idx,
-                    )
-                    self._cache_user(telegram_id, user)
-                    return user
-
-            # Пользователь не найден - кэшируем None
-            self._cache_user(telegram_id, None)
-            return None
-        except Exception as e:
-            logger.error(f"Error getting user: {e}")
-            raise
-
-    async def add_user_to_whitelist(self, user: User) -> None:
-        """Добавить пользователя в whitelist (ожидает одобрения)"""
-        try:
-            agc = await self._get_client()
-            ss = await agc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
-            ws = await ss.worksheet(settings.SHEET_NAMES["whitelist"])
-
-            await ws.append_row(
-                [user.telegram_id, user.stage, user.is_approved],
-                value_input_option="USER_ENTERED",
-            )
-            # Инвалидируем кэш
-            self._invalidate_user_cache(user.telegram_id)
-        except Exception as e:
-            logger.error(f"Error adding user to whitelist: {e}")
-            raise
-
-    async def approve_user(self, telegram_id: int) -> bool:
-        """Одобрить пользователя"""
-        try:
-            user = await self.get_user_by_telegram_id(telegram_id)
-            if user and user.row_index:
-                agc = await self._get_client()
-                ss = await agc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
-                ws = await ss.worksheet(settings.SHEET_NAMES["whitelist"])
-
-                # Колонка C - approved
-                await ws.update_cell(user.row_index, 3, True)
-                # Инвалидируем кэш
-                self._invalidate_user_cache(telegram_id)
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error approving user: {e}")
-            raise
-
-    async def reject_user(self, telegram_id: int) -> bool:
-        """Отклонить и удалить пользователя из whitelist (чтобы мог подать заявку заново)"""
-        try:
-            user = await self.get_user_by_telegram_id(telegram_id)
-            if user and user.row_index:
-                agc = await self._get_client()
-                ss = await agc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
-                ws = await ss.worksheet(settings.SHEET_NAMES["whitelist"])
-
-                # Удаляем строку пользователя
-                await ws.delete_rows(user.row_index)
-                # Инвалидируем кэш
-                self._invalidate_user_cache(telegram_id)
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error rejecting user: {e}")
-            raise
+        """Получение авторизованного клиента (rate-limited)"""
+        async with sheets_rate_limiter:
+            return await agcm.authorize()
 
     # === Аккаунты ===
 
@@ -355,11 +351,13 @@ class SheetsService:
         gender: Gender,
         accounts_data: List[tuple],  # [(account_data, region, employee_stage, status), ...]
     ) -> None:
-        """Добавить несколько записей в таблицу выданных"""
+        """Добавить несколько записей в таблицу выданных с цветами статусов"""
         if not accounts_data:
             return
 
         try:
+            from bot.models.enums import AccountStatus
+
             agc = await self._get_client()
             ss = await agc.open_by_key(settings.SPREADSHEET_ISSUED)
 
@@ -368,13 +366,68 @@ class SheetsService:
 
             date_str = datetime.now().strftime("%d.%m.%y")
 
+            # Получаем текущие данные для расчёта позиций новых строк
+            all_values = await ws.get_all_values()
+
+            # Находим последнюю ЗАПОЛНЕННУЮ строку (игнорируем пустые)
+            last_filled_row = 1  # Минимум заголовок
+            for i, row in enumerate(all_values, start=1):
+                if row and any(cell.strip() for cell in row if cell):
+                    last_filled_row = i
+
+            start_row = last_filled_row + 1
+
+            # Подготавливаем строки и информацию о цветах
             rows = []
-            for account_data, region, employee_stage, status in accounts_data:
-                row = [date_str] + account_data + [region, employee_stage, status]
+            status_colors = []  # [(row_index, color), ...]
+
+            for idx, (account_data, region, employee_stage, status) in enumerate(accounts_data):
+                # Конвертируем статус в русское название
+                try:
+                    status_enum = AccountStatus(status)
+                    status_text = status_enum.table_name
+                    bg_color = status_enum.background_color
+                except ValueError:
+                    status_text = status
+                    bg_color = None
+
+                row = [date_str] + account_data + [region, employee_stage, status_text]
                 rows.append(row)
 
-            # Добавляем все строки за один запрос
-            await ws.append_rows(rows, value_input_option="USER_ENTERED")
+                if bg_color:
+                    status_colors.append((start_row + idx, bg_color))
+
+            # Записываем в конкретный диапазон после последней заполненной строки
+            if rows:
+                end_row = start_row + len(rows) - 1
+                # Определяем количество колонок по первой строке
+                num_cols = len(rows[0])
+                end_col = chr(ord('A') + num_cols - 1) if num_cols <= 26 else 'Z'
+                range_str = f"A{start_row}:{end_col}{end_row}"
+
+                await ws.update(range_str, rows, value_input_option="USER_ENTERED")
+
+            # Применяем цвета к ячейкам статуса
+            # Находим колонку статуса (последняя)
+            # Форматируем все ячейки со статусами за один batch запрос
+            if status_colors and rows:
+                status_col = len(rows[0])
+                col_letter = chr(ord('A') + status_col - 1) if status_col <= 26 else 'Z'
+
+                formats_to_apply = []
+                for row_index, bg_color in status_colors:
+                    cell_address = f"{col_letter}{row_index}"
+                    formats_to_apply.append({
+                        "range": cell_address,
+                        "format": {"backgroundColor": bg_color}
+                    })
+
+                if formats_to_apply:
+                    try:
+                        await ws.batch_format(formats_to_apply)
+                    except Exception as e:
+                        logger.warning(f"Failed to batch format cells: {e}")
+
             logger.info(f"Added {len(rows)} issued accounts to {sheet_name}")
 
         except Exception as e:
@@ -404,7 +457,12 @@ class SheetsService:
             # Формируем строку: date | данные аккаунта... | region | employee | status
             row_data = [date_str] + account_data + [region, employee_stage, ""]
 
-            await ws.append_row(row_data, value_input_option="USER_ENTERED")
+            # table_range гарантирует что строка добавится сразу после данных
+            await ws.append_row(
+                row_data,
+                value_input_option="USER_ENTERED",
+                table_range="A1:Z"
+            )
 
             # Получаем ID записи (номер последней строки)
             all_values = await ws.get_all_values()
@@ -416,7 +474,7 @@ class SheetsService:
     async def update_account_status(
         self, account_id: str, status: str
     ) -> None:
-        """Обновить статус выданного аккаунта"""
+        """Обновить статус выданного аккаунта с цветом фона"""
         try:
             # Парсим account_id: resource_gender_rownum
             parts = account_id.rsplit("_", 1)
@@ -424,7 +482,7 @@ class SheetsService:
                 logger.error(f"Invalid account_id format: {account_id}")
                 return
 
-            sheet_key = parts[0]  # например "vk_male"
+            sheet_key = parts[0]  # например "vk_none"
             row_index = int(parts[1])
 
             # Получаем название листа
@@ -438,7 +496,27 @@ class SheetsService:
             header = await ws.row_values(1)
             status_col = len(header)  # Последняя колонка - status
 
-            await ws.update_cell(row_index, status_col, status)
+            # Получаем table_name статуса (без эмодзи) и цвет
+            from bot.models.enums import AccountStatus
+            try:
+                status_enum = AccountStatus(status)
+                status_text = status_enum.table_name
+                bg_color = status_enum.background_color
+            except ValueError:
+                status_text = status
+                bg_color = None
+
+            await ws.update_cell(row_index, status_col, status_text)
+
+            # Применяем цвет фона если есть
+            if bg_color:
+                # Конвертируем номер колонки в букву (A=1, B=2, ...)
+                col_letter = chr(ord('A') + status_col - 1) if status_col <= 26 else 'Z'
+                cell_address = f"{col_letter}{row_index}"
+                await ws.format(cell_address, {
+                    "backgroundColor": bg_color
+                })
+
         except Exception as e:
             logger.error(f"Error updating account status: {e}")
             raise
@@ -644,6 +722,386 @@ class SheetsService:
         except Exception as e:
             logger.error(f"Error getting statistics by regions: {e}")
             return {region: AccountStatistics() for region in regions}
+
+    # === Статистика почт ===
+
+    def _get_email_sheet_name(self, email_resource: EmailResource, email_type: Optional[Gender]) -> str:
+        """Получить название листа выдачи для почт"""
+        if email_resource == EmailResource.GMAIL:
+            if email_type == Gender.GMAIL_DOMAIN:
+                return settings.SHEET_NAMES.get("gmail_gmail_domain", "Гугл Гмейл")
+            else:
+                return settings.SHEET_NAMES.get("gmail_any", "Гугл Обыч")
+        elif email_resource == EmailResource.RAMBLER:
+            return settings.SHEET_NAMES.get("rambler_issued", "Рамблер Выдано")
+        return "Unknown"
+
+    async def get_email_statistics(
+        self,
+        email_resource: EmailResource,
+        email_type: Optional[Gender],  # None для Rambler
+        region: Optional[str],  # None для всех регионов
+        period: str,
+    ) -> AccountStatistics:
+        """Получить статистику выданных почт за период"""
+        try:
+            agc = await self._get_client()
+            ss = await agc.open_by_key(settings.SPREADSHEET_ISSUED)
+
+            sheet_name = self._get_email_sheet_name(email_resource, email_type)
+            ws = await ss.worksheet(sheet_name)
+
+            all_values = await ws.get_all_values()
+
+            # Определяем дату начала периода
+            now = datetime.now()
+            if period == "day":
+                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "week":
+                start_date = now - timedelta(days=7)
+            elif period == "month":
+                start_date = now - timedelta(days=30)
+            else:
+                start_date = now - timedelta(days=1)
+
+            stats = AccountStatistics()
+
+            if len(all_values) < 2:
+                return stats
+
+            # Формат почт: Дата выдачи | Логин | Пароль | Доп инфа | Регион | Employee | Статус
+            # Индексы:        0           1        2         3         4        5         6
+            date_col = 0
+            region_col = 4
+            status_col = 6
+
+            for row in all_values[1:]:
+                if not row or not row[0]:
+                    continue
+
+                try:
+                    row_date = parse_date(row[date_col])
+                except (ValueError, IndexError):
+                    continue
+
+                if row_date < start_date:
+                    continue
+
+                # Проверяем регион
+                if region and region != "all":
+                    try:
+                        row_region = row[region_col] if len(row) > region_col else ""
+                        if row_region != region:
+                            continue
+                    except IndexError:
+                        continue
+
+                stats.total += 1
+
+                try:
+                    status = row[status_col].lower().strip() if len(row) > status_col else ""
+                except IndexError:
+                    status = ""
+
+                if status == "good" or status == "хороший":
+                    stats.good += 1
+                elif status == "block" or status == "блок":
+                    stats.block += 1
+                elif status == "defect" or status == "дефектный":
+                    stats.defect += 1
+                else:
+                    stats.no_status += 1
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error getting email statistics: {e}")
+            return AccountStatistics()
+
+    async def get_email_statistics_by_regions(
+        self,
+        email_resource: EmailResource,
+        email_type: Optional[Gender],
+        regions: List[str],
+        period: str,
+    ) -> Dict[str, AccountStatistics]:
+        """Получить статистику почт по каждому региону отдельно"""
+        try:
+            agc = await self._get_client()
+            ss = await agc.open_by_key(settings.SPREADSHEET_ISSUED)
+
+            sheet_name = self._get_email_sheet_name(email_resource, email_type)
+            ws = await ss.worksheet(sheet_name)
+
+            all_values = await ws.get_all_values()
+
+            now = datetime.now()
+            if period == "day":
+                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "week":
+                start_date = now - timedelta(days=7)
+            elif period == "month":
+                start_date = now - timedelta(days=30)
+            else:
+                start_date = now - timedelta(days=1)
+
+            stats_by_region: Dict[str, AccountStatistics] = {
+                region: AccountStatistics() for region in regions
+            }
+
+            if len(all_values) < 2:
+                return stats_by_region
+
+            date_col = 0
+            region_col = 4
+            status_col = 6
+
+            for row in all_values[1:]:
+                if not row or not row[0]:
+                    continue
+
+                try:
+                    row_date = parse_date(row[date_col])
+                except (ValueError, IndexError):
+                    continue
+
+                if row_date < start_date:
+                    continue
+
+                try:
+                    row_region = row[region_col] if len(row) > region_col else ""
+                except IndexError:
+                    continue
+
+                if row_region not in stats_by_region:
+                    continue
+
+                stats = stats_by_region[row_region]
+                stats.total += 1
+
+                try:
+                    status = row[status_col].lower().strip() if len(row) > status_col else ""
+                except IndexError:
+                    status = ""
+
+                if status == "good" or status == "хороший":
+                    stats.good += 1
+                elif status == "block" or status == "блок":
+                    stats.block += 1
+                elif status == "defect" or status == "дефектный":
+                    stats.defect += 1
+                else:
+                    stats.no_status += 1
+
+            return stats_by_region
+
+        except Exception as e:
+            logger.error(f"Error getting email statistics by regions: {e}")
+            return {region: AccountStatistics() for region in regions}
+
+    # === Статистика номеров ===
+
+    async def get_number_statistics(
+        self,
+        region: Optional[str],  # None для всех регионов
+        period: str,
+    ) -> NumberStatistics:
+        """
+        Получить статистику выданных номеров за период.
+
+        Считает:
+        - Общее количество номеров
+        - Сколько каждого ресурса было зарегистрировано (Beboo, Loloo, Tabor)
+        - Статусы номеров
+        """
+        try:
+            agc = await self._get_client()
+            ss = await agc.open_by_key(settings.SPREADSHEET_ISSUED)
+
+            sheet_name = settings.SHEET_NAMES.get("numbers_issued", "Номера Выдано")
+            ws = await ss.worksheet(sheet_name)
+
+            all_values = await ws.get_all_values()
+
+            now = datetime.now()
+            if period == "day":
+                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "week":
+                start_date = now - timedelta(days=7)
+            elif period == "month":
+                start_date = now - timedelta(days=30)
+            else:
+                start_date = now - timedelta(days=1)
+
+            stats = NumberStatistics()
+
+            if len(all_values) < 2:
+                return stats
+
+            # Формат номеров: Дата выдачи | Номер | Регионы | Employee | Ресурсы | Статус
+            # Индексы:            0          1        2          3         4        5
+            date_col = 0
+            region_col = 2
+            resources_col = 4
+            status_col = 5
+
+            for row in all_values[1:]:
+                if not row or not row[0]:
+                    continue
+
+                try:
+                    row_date = parse_date(row[date_col])
+                except (ValueError, IndexError):
+                    continue
+
+                if row_date < start_date:
+                    continue
+
+                # Проверяем регион (в номерах регионы через запятую)
+                if region and region != "all":
+                    try:
+                        row_regions = row[region_col] if len(row) > region_col else ""
+                        regions_list = [r.strip() for r in row_regions.split(",")]
+                        if region not in regions_list:
+                            continue
+                    except IndexError:
+                        continue
+
+                stats.total += 1
+
+                # Парсим ресурсы и считаем каждый
+                try:
+                    resources_str = row[resources_col].lower() if len(row) > resources_col else ""
+                    if "beboo" in resources_str:
+                        stats.beboo += 1
+                    if "loloo" in resources_str:
+                        stats.loloo += 1
+                    if "табор" in resources_str or "tabor" in resources_str:
+                        stats.tabor += 1
+                except IndexError:
+                    pass
+
+                # Парсим статус
+                try:
+                    status = row[status_col].lower().strip() if len(row) > status_col else ""
+                except IndexError:
+                    status = ""
+
+                if status == "рабочий" or status == "working":
+                    stats.working += 1
+                elif status == "сброс" or status == "reset":
+                    stats.reset += 1
+                elif status == "зареган" or status == "registered":
+                    stats.registered += 1
+                elif status == "выбило тг" or status == "tg_kicked":
+                    stats.tg_kicked += 1
+                else:
+                    stats.no_status += 1
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error getting number statistics: {e}")
+            return NumberStatistics()
+
+    async def get_number_statistics_by_regions(
+        self,
+        regions: List[str],
+        period: str,
+    ) -> Dict[str, NumberStatistics]:
+        """Получить статистику номеров по каждому региону отдельно"""
+        try:
+            agc = await self._get_client()
+            ss = await agc.open_by_key(settings.SPREADSHEET_ISSUED)
+
+            sheet_name = settings.SHEET_NAMES.get("numbers_issued", "Номера Выдано")
+            ws = await ss.worksheet(sheet_name)
+
+            all_values = await ws.get_all_values()
+
+            now = datetime.now()
+            if period == "day":
+                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "week":
+                start_date = now - timedelta(days=7)
+            elif period == "month":
+                start_date = now - timedelta(days=30)
+            else:
+                start_date = now - timedelta(days=1)
+
+            stats_by_region: Dict[str, NumberStatistics] = {
+                region: NumberStatistics() for region in regions
+            }
+
+            if len(all_values) < 2:
+                return stats_by_region
+
+            date_col = 0
+            region_col = 2
+            resources_col = 4
+            status_col = 5
+
+            for row in all_values[1:]:
+                if not row or not row[0]:
+                    continue
+
+                try:
+                    row_date = parse_date(row[date_col])
+                except (ValueError, IndexError):
+                    continue
+
+                if row_date < start_date:
+                    continue
+
+                # Номер может быть связан с несколькими регионами
+                try:
+                    row_regions = row[region_col] if len(row) > region_col else ""
+                    regions_list = [r.strip() for r in row_regions.split(",")]
+                except IndexError:
+                    continue
+
+                # Считаем для каждого региона из записи
+                for row_region in regions_list:
+                    if row_region not in stats_by_region:
+                        continue
+
+                    stats = stats_by_region[row_region]
+                    stats.total += 1
+
+                    # Ресурсы
+                    try:
+                        resources_str = row[resources_col].lower() if len(row) > resources_col else ""
+                        if "beboo" in resources_str:
+                            stats.beboo += 1
+                        if "loloo" in resources_str:
+                            stats.loloo += 1
+                        if "табор" in resources_str or "tabor" in resources_str:
+                            stats.tabor += 1
+                    except IndexError:
+                        pass
+
+                    # Статус
+                    try:
+                        status = row[status_col].lower().strip() if len(row) > status_col else ""
+                    except IndexError:
+                        status = ""
+
+                    if status == "рабочий" or status == "working":
+                        stats.working += 1
+                    elif status == "сброс" or status == "reset":
+                        stats.reset += 1
+                    elif status == "зареган" or status == "registered":
+                        stats.registered += 1
+                    elif status == "выбило тг" or status == "tg_kicked":
+                        stats.tg_kicked += 1
+                    else:
+                        stats.no_status += 1
+
+            return stats_by_region
+
+        except Exception as e:
+            logger.error(f"Error getting number statistics by regions: {e}")
+            return {region: NumberStatistics() for region in regions}
 
 
 sheets_service = SheetsService()

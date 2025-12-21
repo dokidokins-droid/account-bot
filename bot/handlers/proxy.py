@@ -3,6 +3,7 @@ import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
 
 from bot.states.states import ProxyStates, AccountFlowStates
 from bot.keyboards.callbacks import (
@@ -16,6 +17,8 @@ from bot.keyboards.callbacks import (
     ProxyTypeCallback,
     ProxyResourceToggleCallback,
     ProxyResourceConfirmCallback,
+    ProxyToggleCallback,
+    ProxyConfirmMultiCallback,
 )
 from bot.keyboards.proxy_keyboards import (
     get_proxy_menu_keyboard,
@@ -26,9 +29,10 @@ from bot.keyboards.proxy_keyboards import (
     get_proxy_back_keyboard,
     get_proxy_type_keyboard,
     get_proxy_resource_multi_keyboard,
+    get_proxy_list_multi_keyboard,
 )
 from bot.keyboards.inline import get_resource_keyboard
-from bot.models.enums import ProxyResource, ProxyDuration, ProxyType, get_country_flag
+from bot.models.enums import ProxyResource, ProxyDuration, ProxyType, get_country_flag, get_country_name
 from bot.services.proxy_service import get_proxy_service
 
 logger = logging.getLogger(__name__)
@@ -250,18 +254,24 @@ async def add_proxy_duration(
             parse_mode="HTML",
         )
 
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error adding proxies: {e}")
     except Exception as e:
         logger.error(f"Error adding proxies: {e}")
-        await callback.message.edit_text(
-            "❌ Произошла ошибка при добавлении прокси",
-        )
+        try:
+            await callback.message.edit_text("❌ Произошла ошибка при добавлении прокси")
+        except TelegramBadRequest:
+            pass
 
     # Возвращаемся в главное меню
     await state.clear()
     await state.set_state(AccountFlowStates.selecting_resource)
     await callback.message.answer(
+        "📦 <b>Выдача аккаунтов</b>\n\n"
         "Выберите ресурс:",
         reply_markup=get_resource_keyboard(),
+        parse_mode="HTML",
     )
 
 
@@ -307,12 +317,18 @@ async def get_proxy_resource(
             parse_mode="HTML",
         )
 
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error getting countries: {e}")
     except Exception as e:
         logger.error(f"Error getting countries: {e}")
-        await callback.message.edit_text(
-            "❌ Ошибка при загрузке прокси",
-            reply_markup=get_proxy_back_keyboard("menu"),
-        )
+        try:
+            await callback.message.edit_text(
+                "❌ Ошибка при загрузке прокси",
+                reply_markup=get_proxy_back_keyboard("menu"),
+            )
+        except TelegramBadRequest:
+            pass
 
 
 @router.callback_query(ProxyCountryCallback.filter(), ProxyStates.get_selecting_country)
@@ -321,43 +337,114 @@ async def get_proxy_country(
     callback_data: ProxyCountryCallback,
     state: FSMContext,
 ):
-    """Выбор страны"""
+    """Выбор страны - переход к множественному выбору прокси"""
     await callback.answer()
 
     country = callback_data.country
     data = await state.get_data()
     resource = data.get("get_resource", "")
+    user_id = callback.from_user.id
 
     await state.update_data(get_country=country)
 
     try:
-        # Получаем прокси для страны
-        proxies = await get_proxy_service().get_proxies_by_country(resource, country)
+        # Получаем прокси с учётом резерваций текущего пользователя
+        proxies, user_reserved = await get_proxy_service().get_proxies_for_user(
+            resource, country, user_id
+        )
+        flag = get_country_flag(country)
+        country_name = get_country_name(country)
 
         if not proxies:
             await callback.message.edit_text(
-                f"❌ Нет доступных прокси для страны {get_country_flag(country)}",
+                f"❌ Нет доступных прокси для страны {flag} {country_name}",
                 reply_markup=get_proxy_back_keyboard("country"),
             )
             return
 
-        await state.set_state(ProxyStates.get_selecting_proxy)
-        flag = get_country_flag(country)
+        # Получаем общее количество выбранных (всех стран)
+        all_reservations = await get_proxy_service().get_user_reservations(user_id)
+        total_selected = len(all_reservations)
+
+        # Переходим в режим множественного выбора
+        await state.set_state(ProxyStates.get_multiselecting)
 
         await callback.message.edit_text(
-            f"📥 Страна: {flag} <b>{country}</b>\n"
-            f"Доступно: {len(proxies)}\n\n"
-            "Выберите прокси:",
-            reply_markup=get_proxy_list_keyboard(proxies, country, page=0),
+            f"📥 Страна: {flag} <b>{country_name}</b>\n"
+            f"Доступно: {len(proxies)} | Выбрано всего: {total_selected}\n\n"
+            "Выберите прокси (можно несколько):",
+            reply_markup=get_proxy_list_multi_keyboard(
+                proxies, country, user_reserved, total_selected, page=0
+            ),
             parse_mode="HTML",
         )
 
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            return
+        logger.error(f"Error getting proxies by country: {e}")
+        await callback.message.edit_text(
+            "❌ Ошибка при загрузке прокси",
+            reply_markup=get_proxy_back_keyboard("country"),
+        )
     except Exception as e:
         logger.error(f"Error getting proxies by country: {e}")
         await callback.message.edit_text(
             "❌ Ошибка при загрузке прокси",
             reply_markup=get_proxy_back_keyboard("country"),
         )
+
+
+@router.callback_query(ProxyCountryCallback.filter(), ProxyStates.get_multiselecting)
+async def switch_country_multiselect(
+    callback: CallbackQuery,
+    callback_data: ProxyCountryCallback,
+    state: FSMContext,
+):
+    """Переключение между странами БЕЗ сброса выбора"""
+    await callback.answer()
+
+    country = callback_data.country
+    data = await state.get_data()
+    resource = data.get("get_resource", "")
+    user_id = callback.from_user.id
+
+    await state.update_data(get_country=country)
+
+    try:
+        proxies, user_reserved = await get_proxy_service().get_proxies_for_user(
+            resource, country, user_id
+        )
+        flag = get_country_flag(country)
+        country_name = get_country_name(country)
+
+        # Общее количество выбранных всех стран
+        all_reservations = await get_proxy_service().get_user_reservations(user_id)
+        total_selected = len(all_reservations)
+
+        if not proxies:
+            await callback.message.edit_text(
+                f"❌ Нет доступных прокси для страны {flag} {country_name}\n"
+                f"Выбрано всего: {total_selected}",
+                reply_markup=get_proxy_back_keyboard("country"),
+            )
+            return
+
+        await callback.message.edit_text(
+            f"📥 Страна: {flag} <b>{country_name}</b>\n"
+            f"Доступно: {len(proxies)} | Выбрано всего: {total_selected}\n\n"
+            "Выберите прокси (можно несколько):",
+            reply_markup=get_proxy_list_multi_keyboard(
+                proxies, country, user_reserved, total_selected, page=0
+            ),
+            parse_mode="HTML",
+        )
+
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error switching country: {e}")
+    except Exception as e:
+        logger.error(f"Error switching country: {e}")
 
 
 @router.callback_query(ProxyPageCallback.filter(), ProxyStates.get_selecting_proxy)
@@ -377,21 +464,28 @@ async def proxy_pagination(
     try:
         proxies = await get_proxy_service().get_proxies_by_country(resource, country)
         flag = get_country_flag(country)
+        country_name = get_country_name(country)
 
         await callback.message.edit_text(
-            f"📥 Страна: {flag} <b>{country}</b>\n"
+            f"📥 Страна: {flag} <b>{country_name}</b>\n"
             f"Доступно: {len(proxies)}\n\n"
             "Выберите прокси:",
             reply_markup=get_proxy_list_keyboard(proxies, country, page=page),
             parse_mode="HTML",
         )
 
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error in pagination: {e}")
     except Exception as e:
         logger.error(f"Error in pagination: {e}")
-        await callback.message.edit_text(
-            "❌ Ошибка при загрузке",
-            reply_markup=get_proxy_back_keyboard("country"),
-        )
+        try:
+            await callback.message.edit_text(
+                "❌ Ошибка при загрузке",
+                reply_markup=get_proxy_back_keyboard("country"),
+            )
+        except TelegramBadRequest:
+            pass
 
 
 @router.callback_query(ProxySelectCallback.filter(), ProxyStates.get_selecting_proxy)
@@ -407,7 +501,11 @@ async def proxy_select(
     country = data.get("get_country", "")
     user_id = callback.from_user.id
 
-    # Пытаемся взять прокси
+    # Сначала получаем информацию о прокси ДО записи текущего ресурса
+    proxy_before = await get_proxy_service().get_proxy_by_row(row_index)
+    previous_used_for = proxy_before.used_for if proxy_before else []
+
+    # Пытаемся взять прокси (это добавит текущий ресурс в used_for)
     proxy = await get_proxy_service().try_take_proxy(row_index, resource, user_id)
 
     if proxy is None:
@@ -418,10 +516,11 @@ async def proxy_select(
         try:
             proxies = await get_proxy_service().get_proxies_by_country(resource, country)
             flag = get_country_flag(country)
+            country_name = get_country_name(country)
 
             if proxies:
                 await callback.message.edit_text(
-                    f"📥 Страна: {flag} <b>{country}</b>\n"
+                    f"📥 Страна: {flag} <b>{country_name}</b>\n"
                     f"Доступно: {len(proxies)}\n\n"
                     "Выберите прокси:",
                     reply_markup=get_proxy_list_keyboard(proxies, country, page=0),
@@ -429,9 +528,12 @@ async def proxy_select(
                 )
             else:
                 await callback.message.edit_text(
-                    f"❌ Больше нет доступных прокси для {flag}",
+                    f"❌ Больше нет доступных прокси для {flag} {country_name}",
                     reply_markup=get_proxy_back_keyboard("country"),
                 )
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                logger.error(f"Error refreshing proxy list: {e}")
         except Exception as e:
             logger.error(f"Error refreshing proxy list: {e}")
 
@@ -441,11 +543,12 @@ async def proxy_select(
     await callback.answer("✅ Прокси получен!")
 
     flag = get_country_flag(proxy.country)
+    country_name = get_country_name(proxy.country)
     resource_obj = ProxyResource(resource)
 
-    # Формируем список использований
+    # Формируем список ПРЕДЫДУЩИХ использований (БЕЗ текущего ресурса)
     used_for_names = []
-    for r in proxy.used_for:
+    for r in previous_used_for:
         try:
             used_for_names.append(ProxyResource(r).display_name)
         except ValueError:
@@ -460,18 +563,207 @@ async def proxy_select(
     proxy_type_display = "HTTP" if proxy.proxy_type == "http" else "SOCKS5"
 
     await callback.message.edit_text(
-        f"✅ <b>Прокси получен</b>\n\n"
-        f"Ресурс: {resource_obj.display_name}\n"
-        f"Страна: {flag} {proxy.country}\n"
+        f"<b>🌐 Прокси получен</b> | {resource_obj.display_name}\n"
+        f"Страна: {flag} {country_name}\n"
         f"Тип: {proxy_type_display}\n"
         f"Осталось дней: {proxy.days_left}\n"
-        f"Использован для: {used_for_text}\n\n"
-        f"<b>HTTP:</b>\n<code>{http_proxy}</code>\n\n"
-        f"<b>SOCKS5:</b>\n<code>{socks5_proxy}</code>",
+        f"Ранее использован для: {used_for_text}\n\n"
+        f"<b>HTTP:</b> <code>{http_proxy}</code>\n"
+        f"<b>SOCKS5:</b> <code>{socks5_proxy}</code>",
         parse_mode="HTML",
     )
 
     # Возвращаемся к выбору ресурса для получения прокси
+    await state.clear()
+    await state.set_state(ProxyStates.get_selecting_resource)
+    await callback.message.answer(
+        "📥 <b>Получение прокси</b>\n\n"
+        "Выберите ресурс:",
+        reply_markup=get_proxy_resource_keyboard("get"),
+        parse_mode="HTML",
+    )
+
+
+# === Множественный выбор прокси ===
+
+@router.callback_query(ProxyToggleCallback.filter(), ProxyStates.get_multiselecting)
+async def proxy_toggle_selection(
+    callback: CallbackQuery,
+    callback_data: ProxyToggleCallback,
+    state: FSMContext,
+):
+    """Toggle выбора прокси (добавить/убрать из выбранных)"""
+    row_index = callback_data.row_index
+    country = callback_data.country
+    page = callback_data.page
+    user_id = callback.from_user.id
+
+    data = await state.get_data()
+    resource = data.get("get_resource", "")
+
+    service = get_proxy_service()
+
+    # Проверяем текущие резервации пользователя
+    user_reservations = await service.get_user_reservations(user_id)
+
+    if row_index in user_reservations:
+        # Уже выбран - отменяем резервацию
+        await service.cancel_reservation(row_index, user_id)
+        await callback.answer("Убрано из выбора")
+    else:
+        # Не выбран - резервируем
+        reserved = await service.reserve_proxies([row_index], resource, user_id)
+        if reserved:
+            await callback.answer("Добавлено в выбор")
+        else:
+            await callback.answer("❌ Прокси уже занят!", show_alert=True)
+
+    # Обновляем клавиатуру
+    try:
+        proxies, user_reserved = await service.get_proxies_for_user(resource, country, user_id)
+        flag = get_country_flag(country)
+        country_name = get_country_name(country)
+
+        # Общее количество выбранных (все страны)
+        all_reservations = await service.get_user_reservations(user_id)
+        total_selected = len(all_reservations)
+
+        await callback.message.edit_text(
+            f"📥 Страна: {flag} <b>{country_name}</b>\n"
+            f"Доступно: {len(proxies)} | Выбрано всего: {total_selected}\n\n"
+            "Выберите прокси (можно несколько):",
+            reply_markup=get_proxy_list_multi_keyboard(
+                proxies, country, user_reserved, total_selected, page=page
+            ),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error updating proxy list: {e}")
+
+
+@router.callback_query(ProxyPageCallback.filter(), ProxyStates.get_multiselecting)
+async def proxy_pagination_multi(
+    callback: CallbackQuery,
+    callback_data: ProxyPageCallback,
+    state: FSMContext,
+):
+    """Пагинация в режиме множественного выбора"""
+    await callback.answer()
+
+    page = callback_data.page
+    country = callback_data.country
+    user_id = callback.from_user.id
+    data = await state.get_data()
+    resource = data.get("get_resource", "")
+
+    try:
+        service = get_proxy_service()
+        proxies, user_reserved = await service.get_proxies_for_user(
+            resource, country, user_id
+        )
+        flag = get_country_flag(country)
+        country_name = get_country_name(country)
+
+        # Общее количество выбранных (все страны)
+        all_reservations = await service.get_user_reservations(user_id)
+        total_selected = len(all_reservations)
+
+        await callback.message.edit_text(
+            f"📥 Страна: {flag} <b>{country_name}</b>\n"
+            f"Доступно: {len(proxies)} | Выбрано всего: {total_selected}\n\n"
+            "Выберите прокси (можно несколько):",
+            reply_markup=get_proxy_list_multi_keyboard(
+                proxies, country, user_reserved, total_selected, page=page
+            ),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error in multi pagination: {e}")
+    except Exception as e:
+        logger.error(f"Error in multi pagination: {e}")
+
+
+@router.callback_query(ProxyConfirmMultiCallback.filter(), ProxyStates.get_multiselecting)
+async def proxy_confirm_multi(
+    callback: CallbackQuery,
+    callback_data: ProxyConfirmMultiCallback,
+    state: FSMContext,
+):
+    """Подтверждение множественного выбора прокси"""
+    user_id = callback.from_user.id
+    data = await state.get_data()
+    resource = data.get("get_resource", "")
+
+    service = get_proxy_service()
+
+    # Получаем резервации пользователя
+    user_reservations = await service.get_user_reservations(user_id)
+
+    if not user_reservations:
+        await callback.answer("❌ Выберите хотя бы один прокси!", show_alert=True)
+        return
+
+    # Показываем статус
+    await callback.message.edit_text(
+        f"⏳ Получение {len(user_reservations)} прокси...",
+        parse_mode="HTML",
+    )
+
+    try:
+        # Batch update - один API запрос для всех прокси
+        taken, failed = await service.take_proxies_batch(
+            user_reservations, resource, user_id
+        )
+
+        if not taken:
+            await callback.message.edit_text(
+                "❌ Не удалось получить прокси. Попробуйте ещё раз.",
+                reply_markup=get_proxy_back_keyboard("country"),
+            )
+            await callback.answer()
+            return
+
+        # Формируем результат с новым форматом
+        resource_obj = ProxyResource(resource)
+
+        # Заголовок с иконкой ресурса
+        lines = [f"<b>✅ Получено прокси: {len(taken)}</b> | {resource_obj.button_text}\n"]
+
+        for proxy in taken:
+            flag = get_country_flag(proxy.country)
+            country_name = get_country_name(proxy.country)
+            http_proxy = proxy.get_http_proxy()
+            socks5_proxy = proxy.get_socks5_proxy()
+
+            # Компактный формат: флаг ip (дней) страна + 2 строки для копирования
+            lines.append(
+                f"\n{flag} <b>{proxy.ip_short}</b> ({proxy.days_left}д) {country_name}\n"
+                f"<code>{http_proxy}</code>\n"
+                f"<code>{socks5_proxy}</code>"
+            )
+
+        if failed:
+            lines.append(f"\n\n⚠️ Не удалось получить: {len(failed)} (уже заняты)")
+
+        await callback.message.edit_text(
+            "\n".join(lines),
+            parse_mode="HTML",
+        )
+
+        await callback.answer("✅ Прокси получены!")
+
+    except Exception as e:
+        logger.error(f"Error confirming proxies: {e}")
+        await callback.message.edit_text(
+            "❌ Произошла ошибка при получении прокси",
+            reply_markup=get_proxy_back_keyboard("country"),
+        )
+        await callback.answer()
+        return
+
+    # Возвращаемся к выбору ресурса
     await state.clear()
     await state.set_state(ProxyStates.get_selecting_resource)
     await callback.message.answer(
@@ -487,11 +779,17 @@ async def proxy_select(
 @router.callback_query(ProxyBackCallback.filter(F.to == "main"))
 async def proxy_back_to_main(callback: CallbackQuery, state: FSMContext):
     """Возврат в главное меню выбора ресурсов"""
+    user_id = callback.from_user.id
+    # Очищаем резервации при выходе
+    await get_proxy_service().cancel_all_reservations(user_id)
+
     await state.clear()
     await state.set_state(AccountFlowStates.selecting_resource)
     await callback.message.edit_text(
+        "📦 <b>Выдача аккаунтов</b>\n\n"
         "Выберите ресурс:",
         reply_markup=get_resource_keyboard(),
+        parse_mode="HTML",
     )
     await callback.answer()
 
@@ -499,6 +797,10 @@ async def proxy_back_to_main(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(ProxyBackCallback.filter(F.to == "menu"))
 async def proxy_back_to_menu(callback: CallbackQuery, state: FSMContext):
     """Возврат в главное меню прокси"""
+    user_id = callback.from_user.id
+    # Очищаем резервации при выходе
+    await get_proxy_service().cancel_all_reservations(user_id)
+
     await state.set_state(ProxyStates.main_menu)
     await callback.message.edit_text(
         "🌐 <b>Прокси</b>\n\n"
@@ -526,6 +828,10 @@ async def proxy_back_to_type(callback: CallbackQuery, state: FSMContext):
 async def proxy_back_to_resource(callback: CallbackQuery, state: FSMContext):
     """Возврат к выбору ресурса"""
     current_state = await state.get_state()
+    user_id = callback.from_user.id
+
+    # Очищаем резервации при выходе из режима выбора прокси
+    await get_proxy_service().cancel_all_reservations(user_id)
 
     if current_state and "add_" in current_state:
         mode = "add"
@@ -547,9 +853,51 @@ async def proxy_back_to_resource(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(ProxyBackCallback.filter(F.to == "country"), ProxyStates.get_multiselecting)
+async def proxy_back_to_country_multiselect(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору страны БЕЗ сброса выбранных прокси"""
+    data = await state.get_data()
+    resource = data.get("get_resource", "")
+    user_id = callback.from_user.id
+
+    # НЕ очищаем резервации - сохраняем выбор между странами
+    all_reservations = await get_proxy_service().get_user_reservations(user_id)
+    total_selected = len(all_reservations)
+
+    # Остаёмся в режиме multiselecting для переключения между странами
+    # Но показываем список стран
+
+    try:
+        countries = await get_proxy_service().get_countries_with_counts(resource)
+        resource_obj = ProxyResource(resource)
+
+        selected_text = f" | Выбрано: {total_selected}" if total_selected > 0 else ""
+
+        await callback.message.edit_text(
+            f"📥 Ресурс: <b>{resource_obj.display_name}</b>{selected_text}\n\n"
+            "Выберите страну:",
+            reply_markup=get_proxy_countries_keyboard(countries),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error going back to countries: {e}")
+    except Exception as e:
+        logger.error(f"Error going back to countries: {e}")
+        try:
+            await callback.message.edit_text(
+                "❌ Ошибка при загрузке",
+                reply_markup=get_proxy_back_keyboard("menu"),
+            )
+        except TelegramBadRequest:
+            pass
+
+    await callback.answer()
+
+
 @router.callback_query(ProxyBackCallback.filter(F.to == "country"))
 async def proxy_back_to_country(callback: CallbackQuery, state: FSMContext):
-    """Возврат к выбору страны"""
+    """Возврат к выбору страны (из обычного режима)"""
     data = await state.get_data()
     resource = data.get("get_resource", "")
 
@@ -565,11 +913,17 @@ async def proxy_back_to_country(callback: CallbackQuery, state: FSMContext):
             reply_markup=get_proxy_countries_keyboard(countries),
             parse_mode="HTML",
         )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Error going back to countries: {e}")
     except Exception as e:
         logger.error(f"Error going back to countries: {e}")
-        await callback.message.edit_text(
-            "❌ Ошибка при загрузке",
-            reply_markup=get_proxy_back_keyboard("menu"),
-        )
+        try:
+            await callback.message.edit_text(
+                "❌ Ошибка при загрузке",
+                reply_markup=get_proxy_back_keyboard("menu"),
+            )
+        except TelegramBadRequest:
+            pass
 
     await callback.answer()

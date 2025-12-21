@@ -1,23 +1,20 @@
 import asyncio
 import logging
-import os
-
-from aiohttp import web
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram.types import BotCommand
 
 from bot.config import settings
-from bot.handlers import start, admin, account_flow, feedback, statistic, proxy, numbers
+from bot.handlers import start, admin, account_flow, feedback, statistic, proxy, numbers, email_flow
 from bot.middlewares.auth import WhitelistMiddleware
 from bot.services.account_service import account_cache
-from bot.services.proxy_service import init_proxy_service
+from bot.services.proxy_service import init_proxy_service, get_proxy_service
 from bot.services.sheets_service import agcm
-from bot.services.number_service import number_service
+from bot.services.number_service import number_service, number_cache
+from bot.services.email_service import email_service
 
 # Настройка логирования
 logging.basicConfig(
@@ -37,9 +34,10 @@ async def on_startup(bot: Bot):
     await bot.set_my_commands(commands)
     logger.info("Bot commands set")
 
-    # Инициализируем сервис прокси
-    init_proxy_service(agcm)
-    logger.info("Proxy service initialized")
+    # Инициализируем сервис прокси и запускаем очистку резерваций
+    proxy_service = init_proxy_service(agcm)
+    await proxy_service.start_cleanup_task()
+    logger.info("Proxy service initialized with cleanup task")
 
     # Создаём листы для номеров если их нет
     await number_service.ensure_sheets_exist()
@@ -49,25 +47,33 @@ async def on_startup(bot: Bot):
     logger.info("Preloading accounts into cache...")
     await account_cache.preload_all()
 
-    # Запуск фоновых задач (запись в Sheets, автоподтверждение)
-    await account_cache.start_background_tasks()
+    # Предзагрузка почт в кэш
+    logger.info("Preloading emails into cache...")
+    await email_service.preload_all()
 
-    if settings.WEBHOOK_URL:
-        webhook_url = f"{settings.WEBHOOK_URL}{settings.WEBHOOK_PATH}"
-        await bot.set_webhook(
-            url=webhook_url,
-            drop_pending_updates=True,
-        )
-        logger.info(f"Webhook set to {webhook_url}")
+    # Предзагрузка номеров в кэш
+    logger.info("Preloading numbers into cache...")
+    await number_cache.preload()
+
+    # Запуск фоновых задач (запись в Sheets, автоподтверждение, сохранение состояния)
+    await account_cache.start_background_tasks()
+    await email_service.start_background_tasks()
+    await number_cache.start_background_tasks()
 
 
 async def on_shutdown(bot: Bot):
     """Действия при остановке бота"""
-    # Корректное завершение кэша (сохранение состояния, flush буферов)
-    await account_cache.shutdown()
+    # Останавливаем фоновые задачи прокси
+    try:
+        await get_proxy_service().stop_cleanup_task()
+    except RuntimeError:
+        pass  # Сервис не был инициализирован
 
-    if settings.WEBHOOK_URL:
-        await bot.delete_webhook()
+    # Корректное завершение кэшей (сохранение состояния, flush буферов)
+    await account_cache.shutdown()
+    await email_service.shutdown()
+    await number_cache.shutdown()
+
     await bot.session.close()
     logger.info("Bot stopped")
 
@@ -88,55 +94,38 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(statistic.router)
     dp.include_router(proxy.router)
     dp.include_router(numbers.router)
+    dp.include_router(email_flow.router)
 
     return dp
 
 
-async def main_polling():
-    """Запуск в режиме polling (для разработки)"""
+async def main():
+    """Запуск бота в режиме polling"""
     bot = Bot(
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp = create_dispatcher()
 
-    # Регистрируем startup/shutdown для polling режима тоже
+    # Регистрируем startup/shutdown
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 
     logger.info("Starting bot in polling mode...")
-    await bot.delete_webhook(drop_pending_updates=True)
+
+    # Удаляем webhook если он был установлен ранее
+    try:
+        webhook_info = await bot.get_webhook_info()
+        if webhook_info.url:
+            logger.warning(f"Active webhook detected: {webhook_info.url}")
+            logger.info("Deleting webhook...")
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Webhook deleted successfully")
+    except Exception as e:
+        logger.error(f"Error checking/deleting webhook: {e}")
+
     await dp.start_polling(bot)
 
 
-def main_webhook():
-    """Запуск в режиме webhook (для Render.com)"""
-    bot = Bot(
-        token=settings.BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
-    dp = create_dispatcher()
-
-    dp.startup.register(on_startup)
-    dp.shutdown.register(on_shutdown)
-
-    app = web.Application()
-
-    webhook_requests_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-    )
-    webhook_requests_handler.register(app, path=settings.WEBHOOK_PATH)
-    setup_application(app, dp, bot=bot)
-
-    # Render.com использует PORT из окружения
-    port = int(os.environ.get("PORT", 10000))
-    logger.info(f"Starting bot in webhook mode on port {port}...")
-    web.run_app(app, host="0.0.0.0", port=port)
-
-
 if __name__ == "__main__":
-    if settings.WEBHOOK_URL:
-        main_webhook()
-    else:
-        asyncio.run(main_polling())
+    asyncio.run(main())

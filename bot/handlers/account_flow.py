@@ -22,11 +22,35 @@ from bot.keyboards.inline import (
 )
 from bot.models.enums import Resource, Gender
 from bot.services.account_service import account_service
-from bot.services.sheets_service import sheets_service
+from bot.services.whitelist_service import whitelist_service
 from bot.utils.formatters import format_account_message, format_selection_summary
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+
+async def redirect_to_start(callback_or_message, state: FSMContext, message: str = None):
+    """Перенаправление на начало flow при отсутствии данных в state"""
+    await state.clear()
+    await state.set_state(AccountFlowStates.selecting_resource)
+
+    text = message or "📦 <b>Выдача аккаунтов</b>\n\n⚠️ Сессия истекла. Начните заново.\n\nВыберите ресурс:"
+
+    if isinstance(callback_or_message, CallbackQuery):
+        try:
+            await callback_or_message.message.edit_text(
+                text,
+                reply_markup=get_resource_keyboard(),
+                parse_mode="HTML",
+            )
+        except Exception:
+            await callback_or_message.message.answer(
+                text,
+                reply_markup=get_resource_keyboard(),
+                parse_mode="HTML",
+            )
+    else:
+        await callback_or_message.answer(text, reply_markup=get_resource_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(ResourceCallback.filter(), AccountFlowStates.selecting_resource)
@@ -60,7 +84,10 @@ async def process_region(
     await callback.answer()
     region = callback_data.region
     data = await state.get_data()
-    resource = data["resource"]
+    resource = data.get("resource")
+
+    if not resource:
+        return await redirect_to_start(callback, state)
 
     await state.update_data(region=region)
     await state.set_state(AccountFlowStates.selecting_quantity)
@@ -81,7 +108,10 @@ async def search_region_start(callback: CallbackQuery, state: FSMContext):
     from bot.keyboards.inline import get_back_to_region_keyboard
 
     data = await state.get_data()
-    resource = data["resource"]
+    resource = data.get("resource")
+
+    if not resource:
+        return await redirect_to_start(callback, state)
 
     await state.set_state(AccountFlowStates.searching_region)
     await callback.message.edit_text(
@@ -105,9 +135,12 @@ async def search_region_input(message: Message, state: FSMContext):
     """Обработка ввода региона"""
     from bot.keyboards.inline import get_back_to_region_keyboard
 
-    region = message.text.strip()
+    region = message.text.strip() if message.text else ""
     data = await state.get_data()
-    resource = data["resource"]
+    resource = data.get("resource")
+
+    if not resource:
+        return await redirect_to_start(message, state)
 
     if not region:
         await message.answer(
@@ -151,51 +184,55 @@ async def process_quantity(
     await callback.answer()
     quantity = callback_data.quantity
     data = await state.get_data()
-    resource = data["resource"]
-    region = data["region"]
+    resource = data.get("resource")
+    region = data.get("region")
+
+    if not resource or not region:
+        return await redirect_to_start(callback, state)
 
     await state.update_data(quantity=quantity)
-    await state.set_state(AccountFlowStates.selecting_gender)
 
-    await callback.message.edit_text(
-        f"Ресурс: <b>{resource.display_name}</b>\n"
-        f"Регион: <b>{region}</b>\n"
-        f"Количество: <b>{quantity}</b>\n\n"
-        f"Выберите тип:",
-        reply_markup=get_gender_keyboard(resource),
-        parse_mode="HTML",
-    )
+    # Для VK и OK сразу выдаём аккаунты без выбора пола
+    if resource in (Resource.VK, Resource.OK):
+        await state.update_data(gender=Gender.NONE)
+        await state.set_state(AccountFlowStates.selecting_gender)
+
+        # Показываем статус загрузки
+        await callback.message.edit_text(
+            f"Ресурс: <b>{resource.display_name}</b>\n"
+            f"Регион: <b>{region}</b>\n"
+            f"Количество: <b>{quantity}</b>\n\n"
+            f"⏳ <i>Загрузка аккаунтов...</i>",
+            parse_mode="HTML",
+        )
+
+        # Выдаём аккаунты
+        await issue_accounts_directly(callback, state, resource, region, quantity, Gender.NONE)
+    else:
+        # Для остальных ресурсов показываем выбор пола/типа
+        await state.set_state(AccountFlowStates.selecting_gender)
+        await callback.message.edit_text(
+            f"Ресурс: <b>{resource.display_name}</b>\n"
+            f"Регион: <b>{region}</b>\n"
+            f"Количество: <b>{quantity}</b>\n\n"
+            f"Выберите тип:",
+            reply_markup=get_gender_keyboard(resource),
+            parse_mode="HTML",
+        )
 
 
-@router.callback_query(GenderCallback.filter(), AccountFlowStates.selecting_gender)
-async def process_gender_and_issue(
+async def issue_accounts_directly(
     callback: CallbackQuery,
-    callback_data: GenderCallback,
     state: FSMContext,
+    resource: Resource,
+    region: str,
+    quantity: int,
+    gender: Gender,
 ):
-    """Обработка выбора пола и выдача аккаунтов"""
-    # Сразу отвечаем на callback чтобы избежать timeout
-    await callback.answer()
-
-    gender = Gender(callback_data.gender)
-    data = await state.get_data()
-    resource = data["resource"]
-    region = data["region"]
-    quantity = data["quantity"]
-
-    # Показываем статус загрузки
-    await callback.message.edit_text(
-        f"{format_selection_summary(resource, region, quantity, gender.display_name)}\n\n"
-        f"⏳ <i>Загрузка аккаунтов...</i>",
-        parse_mode="HTML",
-    )
-
+    """Общая функция для выдачи аккаунтов"""
     # Получаем stage пользователя
-    try:
-        user = await sheets_service.get_user_by_telegram_id(callback.from_user.id)
-        employee_stage = user.stage if user else "unknown"
-    except Exception:
-        employee_stage = "unknown"
+    user = whitelist_service.get_user(callback.from_user.id)
+    employee_stage = user.stage if user else "unknown"
 
     try:
         # Выдаём аккаунты
@@ -214,20 +251,25 @@ async def process_gender_and_issue(
             )
             await state.set_state(AccountFlowStates.selecting_resource)
             await callback.message.answer(
+                "📦 <b>Выдача аккаунтов</b>\n\n"
                 "Выберите ресурс:",
                 reply_markup=get_resource_keyboard(),
+                parse_mode="HTML",
             )
             return
 
         # Обновляем сводку
-        await callback.message.edit_text(
+        summary_text = (
             f"<b>Выдано:</b>\n"
             f"Ресурс: {resource.display_name}\n"
             f"Регион: {region}\n"
-            f"Количество: {len(issued)}\n"
-            f"Тип: {gender.display_name}",
-            parse_mode="HTML",
+            f"Количество: {len(issued)}"
         )
+        # Для ресурсов с полом добавляем тип
+        if gender != Gender.NONE:
+            summary_text += f"\nТип: {gender.display_name}"
+
+        await callback.message.edit_text(summary_text, parse_mode="HTML")
 
         # Отправляем каждый аккаунт отдельным сообщением
         for item in issued:
@@ -261,11 +303,42 @@ async def process_gender_and_issue(
             f"Попробуйте позже."
         )
         await callback.message.answer(
+            "📦 <b>Выдача аккаунтов</b>\n\n"
             "Выберите ресурс:",
             reply_markup=get_resource_keyboard(),
+            parse_mode="HTML",
         )
 
     await state.set_state(AccountFlowStates.selecting_resource)
+
+
+@router.callback_query(GenderCallback.filter(), AccountFlowStates.selecting_gender)
+async def process_gender_and_issue(
+    callback: CallbackQuery,
+    callback_data: GenderCallback,
+    state: FSMContext,
+):
+    """Обработка выбора пола и выдача аккаунтов"""
+    # Сразу отвечаем на callback чтобы избежать timeout
+    await callback.answer()
+
+    gender = Gender(callback_data.gender)
+    data = await state.get_data()
+    resource = data.get("resource")
+    region = data.get("region")
+    quantity = data.get("quantity")
+
+    if not resource or not region or not quantity:
+        return await redirect_to_start(callback, state)
+
+    # Показываем статус загрузки
+    await callback.message.edit_text(
+        f"{format_selection_summary(resource, region, quantity, gender.display_name)}\n\n"
+        f"⏳ <i>Загрузка аккаунтов...</i>",
+        parse_mode="HTML",
+    )
+
+    await issue_accounts_directly(callback, state, resource, region, quantity, gender)
 
 
 # === Обработка кнопки "Назад" ===
@@ -277,8 +350,10 @@ async def back_to_resource(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(AccountFlowStates.selecting_resource)
     await callback.message.edit_text(
+        "📦 <b>Выдача аккаунтов</b>\n\n"
         "Выберите ресурс:",
         reply_markup=get_resource_keyboard(),
+        parse_mode="HTML",
     )
 
 
@@ -292,8 +367,10 @@ async def back_to_region(callback: CallbackQuery, state: FSMContext):
     if not resource:
         await state.set_state(AccountFlowStates.selecting_resource)
         await callback.message.edit_text(
+            "📦 <b>Выдача аккаунтов</b>\n\n"
             "Выберите ресурс:",
             reply_markup=get_resource_keyboard(),
+            parse_mode="HTML",
         )
     else:
         await state.set_state(AccountFlowStates.selecting_region)
@@ -311,6 +388,9 @@ async def back_to_region_from_search(callback: CallbackQuery, state: FSMContext)
     await callback.answer()
     data = await state.get_data()
     resource = data.get("resource")
+
+    if not resource:
+        return await redirect_to_start(callback, state)
 
     await state.set_state(AccountFlowStates.selecting_region)
     await callback.message.edit_text(
@@ -332,8 +412,10 @@ async def back_to_quantity(callback: CallbackQuery, state: FSMContext):
     if not resource or not region:
         await state.set_state(AccountFlowStates.selecting_resource)
         await callback.message.edit_text(
+            "📦 <b>Выдача аккаунтов</b>\n\n"
             "Выберите ресурс:",
             reply_markup=get_resource_keyboard(),
+            parse_mode="HTML",
         )
     else:
         await state.set_state(AccountFlowStates.selecting_quantity)

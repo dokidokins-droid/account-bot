@@ -6,18 +6,20 @@ from aiogram.types import CallbackQuery
 from bot.keyboards.callbacks import AccountFeedbackCallback, ReplaceAccountCallback
 from bot.keyboards.inline import get_replace_keyboard, get_feedback_keyboard
 from bot.services.account_service import account_service
-from bot.services.sheets_service import sheets_service
-from bot.models.enums import Resource, Gender
-from bot.utils.formatters import format_account_message
+from bot.services.whitelist_service import whitelist_service
+from bot.models.enums import Resource, Gender, AccountStatus
+from bot.utils.formatters import format_account_message, make_compact_after_feedback
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-STATUS_DISPLAY = {
-    "block": "🚫 Блок",
-    "good": "✅ Хороший",
-    "defect": "⚠️ Дефектный",
-}
+
+def get_status_display(status: str) -> str:
+    """Получить отображаемое имя статуса с эмодзи"""
+    try:
+        return AccountStatus(status).display_name
+    except ValueError:
+        return status
 
 
 @router.callback_query(AccountFeedbackCallback.filter())
@@ -36,8 +38,11 @@ async def process_feedback(
         # Подтверждаем аккаунт мгновенно (добавляет в буфер записи)
         success = account_service.confirm_feedback(account_id, status)
 
-        # Обновляем сообщение
-        new_text = f"{callback.message.html_text}\n\n<b>Статус: {STATUS_DISPLAY.get(status, status)}</b>"
+        # Получаем отображаемое имя статуса
+        status_display = get_status_display(status)
+
+        # Компактный формат сообщения (без строки копирования)
+        new_text = make_compact_after_feedback(callback.message.html_text, status_display)
 
         # Для block и defect показываем кнопку замены
         if status in ("block", "defect"):
@@ -56,7 +61,7 @@ async def process_feedback(
         if not success:
             logger.warning(f"Account {account_id} confirmation returned False")
 
-        await callback.answer(STATUS_DISPLAY.get(status, status))
+        await callback.answer(status_display)
 
     except Exception as e:
         logger.error(f"Error processing feedback: {e}")
@@ -80,11 +85,8 @@ async def process_replace(
         gender = Gender(gender_str)
 
         # Получаем stage пользователя
-        try:
-            user = await sheets_service.get_user_by_telegram_id(callback.from_user.id)
-            employee_stage = user.stage if user else "unknown"
-        except Exception:
-            employee_stage = "unknown"
+        user = whitelist_service.get_user(callback.from_user.id)
+        employee_stage = user.stage if user else "unknown"
 
         # Выдаём один аккаунт на замену (мгновенно из кэша)
         issued = await account_service.issue_accounts(

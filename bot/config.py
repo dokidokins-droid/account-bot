@@ -21,28 +21,24 @@ class Settings(BaseSettings):
         """Получить список регионов"""
         return [r.strip() for r in self.REGIONS.split(",") if r.strip()]
 
-    # Webhook (для Render.com, оставить пустым для polling)
-    WEBHOOK_URL: str = ""
-    WEBHOOK_PATH: str = "/webhook"
-
     # Названия листов для аккаунтов
     # Формат таблицы База: дата | логин | пароль | ...
     # Формат таблицы Выдача: дата | логин | пароль | ... | регион | employee | status
     SHEET_NAMES: dict = {
-        "vk_male": "ВК Муж",
-        "vk_female": "ВК Жен",
+        "vk_none": "ВКонтакте",
         "mamba_male": "Мамб Муж",
         "mamba_female": "Мамб Жен",
-        "ok_male": "ОК Муж",
-        "ok_female": "ОК Жен",
-        "gmail_domain": "Гугл Гмейл",
+        "ok_none": "Одноклассники",
+        "gmail_gmail_domain": "Гугл Гмейл",
         "gmail_any": "Гугл Обыч",
-        "whitelist": "whitelist",
         # Номера телефонов (общие для Beboo/Loloo/Табор)
         # Формат База: дата | номер
         # Формат Выдача: дата | номер | регион | employee | ресурсы
         "numbers": "Номера",
         "numbers_issued": "Номера Выдано",
+        # Почты
+        # Формат: дата | логин | пароль
+        "rambler_none": "Рамблер",
     }
 
     class Config:
