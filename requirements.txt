@@ -6,3 +6,11 @@ pydantic==2.9.2
 pydantic-settings==2.6.1
 aiohttp==3.10.10
 python-dotenv==1.0.1
+aiogram==3.13.1
+aiohttp==3.10.10
+google-auth==2.35.0
+gspread==6.0.2
+gspread-asyncio==2.0.0
+pydantic==2.9.2
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
