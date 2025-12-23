@@ -2,38 +2,6 @@
   "available": {
     "mamba_male": [
       {
-        "login": "k4w8ey9@jiu.llanhai.com",
-        "password": "fTupzXMu",
-        "row_index": 14,
-        "email_password": "WMZxtieq",
-        "confirmation_link": "https://translate.google.com/",
-        "backup_email": null
-      },
-      {
-        "login": "2imh80v@jiu.llanhai.com",
-        "password": "NDwtZOaW",
-        "row_index": 15,
-        "email_password": "fTupzXMu",
-        "confirmation_link": "https://translate.google.com/",
-        "backup_email": null
-      },
-      {
-        "login": "jnlx8dz@jiu.llanhai.com",
-        "password": "BjDipDTF",
-        "row_index": 16,
-        "email_password": "NDwtZOaW",
-        "confirmation_link": "https://translate.google.com/",
-        "backup_email": null
-      },
-      {
-        "login": "69jacxu@jiu.llanhai.com",
-        "password": "iKYGwzXq",
-        "row_index": 2,
-        "email_password": "BMkAdAzn",
-        "confirmation_link": "https://translate.google.com/",
-        "backup_email": null
-      },
-      {
         "login": "2imh80v@jiu.llanhai.com",
         "password": "NDwtZOaW",
         "row_index": 3,
@@ -148,14 +116,6 @@
     ],
     "mamba_female": [
       {
-        "login": "veg7zs3@jiu.llanhai.com",
-        "password": "WMZxtieq",
-        "row_index": 5,
-        "email_password": "NDwtZOaW",
-        "confirmation_link": "https://translate.google.com/",
-        "backup_email": null
-      },
-      {
         "login": "k4w8ey9@jiu.llanhai.com",
         "password": "fTupzXMu",
         "row_index": 6,
@@ -248,62 +208,6 @@
       {
         "login": "04w59pa@jiu.llanhai.com",
         "password": "BMkAdAzn",
-        "row_index": 4,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "k4w8ey9@jiu.llanhai.com",
-        "password": "fTupzXMu",
-        "row_index": 5,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "2imh80v@jiu.llanhai.com",
-        "password": "NDwtZOaW",
-        "row_index": 6,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "69jacxu@jiu.llanhai.com",
-        "password": "iKYGwzXq",
-        "row_index": 7,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "jnlx8dz@jiu.llanhai.com",
-        "password": "BjDipDTF",
-        "row_index": 8,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "veg7zs3@jiu.llanhai.com",
-        "password": "WMZxtieq",
-        "row_index": 9,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "fm0ws6c@jiu.llanhai.com",
-        "password": "ZzqeiSaD",
-        "row_index": 10,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "04w59pa@jiu.llanhai.com",
-        "password": "BMkAdAzn",
         "row_index": 11,
         "email_password": null,
         "confirmation_link": null,
@@ -354,87 +258,15 @@
       {
         "login": "k4w8ey9@jiu.llanhai.com",
         "password": "fTupzXMu",
-        "row_index": 14,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "04w59pa@jiu.llanhai.com",
-        "password": "BMkAdAzn",
-        "row_index": 15,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "fm0ws6c@jiu.llanhai.com",
-        "password": "ZzqeiSaD",
-        "row_index": 16,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "jnlx8dz@jiu.llanhai.com",
-        "password": "BjDipDTF",
-        "row_index": 2,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "jnlx8dz@jiu.llanhai.com",
-        "password": "BjDipDTF",
-        "row_index": 3,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "jnlx8dz@jiu.llanhai.com",
-        "password": "BjDipDTF",
-        "row_index": 4,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "jnlx8dz@jiu.llanhai.com",
-        "password": "BjDipDTF",
-        "row_index": 5,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "veg7zs3@jiu.llanhai.com",
-        "password": "WMZxtieq",
         "row_index": 6,
         "email_password": null,
         "confirmation_link": null,
         "backup_email": null
       },
       {
-        "login": "04w59pa@jiu.llanhai.com",
-        "password": "BMkAdAzn",
+        "login": "veg7zs3@jiu.llanhai.com",
+        "password": "WMZxtieq",
         "row_index": 7,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "k4w8ey9@jiu.llanhai.com",
-        "password": "fTupzXMu",
-        "row_index": 8,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "fm0ws6c@jiu.llanhai.com",
-        "password": "ZzqeiSaD",
-        "row_index": 9,
         "email_password": null,
         "confirmation_link": null,
         "backup_email": null
@@ -442,47 +274,7 @@
       {
         "login": "jnlx8dz@jiu.llanhai.com",
         "password": "BjDipDTF",
-        "row_index": 10,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "veg7zs3@jiu.llanhai.com",
-        "password": "WMZxtieq",
-        "row_index": 11,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "fm0ws6c@jiu.llanhai.com",
-        "password": "ZzqeiSaD",
-        "row_index": 12,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "04w59pa@jiu.llanhai.com",
-        "password": "BMkAdAzn",
-        "row_index": 13,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "k4w8ey9@jiu.llanhai.com",
-        "password": "fTupzXMu",
-        "row_index": 14,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      {
-        "login": "2imh80v@jiu.llanhai.com",
-        "password": "NDwtZOaW",
-        "row_index": 15,
+        "row_index": 8,
         "email_password": null,
         "confirmation_link": null,
         "backup_email": null
@@ -490,6 +282,62 @@
       {
         "login": "69jacxu@jiu.llanhai.com",
         "password": "iKYGwzXq",
+        "row_index": 9,
+        "email_password": null,
+        "confirmation_link": null,
+        "backup_email": null
+      },
+      {
+        "login": "2imh80v@jiu.llanhai.com",
+        "password": "NDwtZOaW",
+        "row_index": 10,
+        "email_password": null,
+        "confirmation_link": null,
+        "backup_email": null
+      },
+      {
+        "login": "fm0ws6c@jiu.llanhai.com",
+        "password": "ZzqeiSaD",
+        "row_index": 11,
+        "email_password": null,
+        "confirmation_link": null,
+        "backup_email": null
+      },
+      {
+        "login": "04w59pa@jiu.llanhai.com",
+        "password": "BMkAdAzn",
+        "row_index": 12,
+        "email_password": null,
+        "confirmation_link": null,
+        "backup_email": null
+      },
+      {
+        "login": "k4w8ey9@jiu.llanhai.com",
+        "password": "fTupzXMu",
+        "row_index": 13,
+        "email_password": null,
+        "confirmation_link": null,
+        "backup_email": null
+      },
+      {
+        "login": "2imh80v@jiu.llanhai.com",
+        "password": "NDwtZOaW",
+        "row_index": 14,
+        "email_password": null,
+        "confirmation_link": null,
+        "backup_email": null
+      },
+      {
+        "login": "69jacxu@jiu.llanhai.com",
+        "password": "iKYGwzXq",
+        "row_index": 15,
+        "email_password": null,
+        "confirmation_link": null,
+        "backup_email": null
+      },
+      {
+        "login": "k4w8ey9@jiu.llanhai.com",
+        "password": "fTupzXMu",
         "row_index": 16,
         "email_password": null,
         "confirmation_link": null,
@@ -741,7 +589,23 @@
       }
     ]
   },
-  "pending": {},
+  "pending": {
+    "acc_c54568e37b36": {
+      "resource": "vk",
+      "gender": "none",
+      "region": "719",
+      "employee_stage": "Gnomik1",
+      "account": {
+        "login": "fm0ws6c@jiu.llanhai.com",
+        "password": "ZzqeiSaD",
+        "row_index": 10,
+        "email_password": null,
+        "confirmation_link": null,
+        "backup_email": null
+      },
+      "issued_at": 1766406318.0394337
+    }
+  },
   "write_buffer": {
     "mamba_male": [],
     "gmail_any": [],
@@ -751,5 +615,5 @@
     "vk_none": [],
     "ok_none": []
   },
-  "saved_at": 1766347358.0974755
+  "saved_at": 1766406892.6804993
 }
