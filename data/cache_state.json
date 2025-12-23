@@ -589,31 +589,27 @@
       }
     ]
   },
-  "pending": {
-    "acc_c54568e37b36": {
-      "resource": "vk",
-      "gender": "none",
-      "region": "719",
-      "employee_stage": "Gnomik1",
-      "account": {
-        "login": "fm0ws6c@jiu.llanhai.com",
-        "password": "ZzqeiSaD",
-        "row_index": 10,
-        "email_password": null,
-        "confirmation_link": null,
-        "backup_email": null
-      },
-      "issued_at": 1766406318.0394337
-    }
-  },
+  "pending": {},
   "write_buffer": {
     "mamba_male": [],
     "gmail_any": [],
     "vk_female": [],
     "ok_male": [],
     "mamba_female": [],
-    "vk_none": [],
+    "vk_none": [
+      {
+        "resource": "vk",
+        "gender": "none",
+        "account_data": [
+          "fm0ws6c@jiu.llanhai.com",
+          "ZzqeiSaD"
+        ],
+        "region": "719",
+        "employee_stage": "Gnomik1",
+        "status": "good"
+      }
+    ],
     "ok_none": []
   },
-  "saved_at": 1766406892.6804993
+  "saved_at": 1766470903.004814
 }
