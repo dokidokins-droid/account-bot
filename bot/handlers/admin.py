@@ -13,10 +13,14 @@ from bot.keyboards.callbacks import (
     BufferClearTypeCallback,
     BufferClearConfirmCallback,
     BufferClearBackCallback,
+    BufferReleaseCategoryCallback,
+    BufferReleaseResourceCallback,
+    BufferReleaseConfirmCallback,
+    BufferReleaseBackCallback,
 )
 from bot.services.whitelist_service import whitelist_service
 from bot.services.region_service import region_service
-from bot.services.number_service import number_service
+from bot.services.number_service import number_service, number_cache
 from bot.services.account_service import account_cache
 from bot.services.email_service import email_cache
 from bot.keyboards.number_keyboards import get_number_today_mode_keyboard
@@ -26,8 +30,13 @@ from bot.keyboards.inline import (
     get_buffer_clear_emails_keyboard,
     get_buffer_clear_type_keyboard,
     get_buffer_clear_confirm_keyboard,
+    get_buffer_release_category_keyboard,
+    get_buffer_release_accounts_keyboard,
+    get_buffer_release_emails_keyboard,
+    get_buffer_release_numbers_keyboard,
+    get_buffer_release_confirm_keyboard,
 )
-from bot.states.states import BufferClearStates
+from bot.states.states import BufferClearStates, BufferReleaseStates
 from bot.config import settings
 
 logger = logging.getLogger(__name__)
@@ -310,12 +319,12 @@ async def toggle_numbers_today_mode(
 
 RESOURCE_NAMES = {
     "vk": "🔵 ВКонтакте",
-    "mamba_male": "🟠 Мамба Мужские",
-    "mamba_female": "🟠 Мамба Женские",
-    "ok": "🟡 Одноклассники",
-    "gmail_any": "🟢 Gmail Обычные",
-    "gmail_domain": "🟢 Gmail gmail.com",
-    "rambler": "🔵 Рамблер",
+    "mamba_male": "🔴 Мамба Мужские",
+    "mamba_female": "🔴 Мамба Женские",
+    "ok": "🟠 Одноклассники",
+    "gmail_any": "📧 Gmail Обычные",
+    "gmail_domain": "📧 Gmail gmail.com",
+    "rambler": "📨 Рамблер",
     "all_accounts": "📦 Все аккаунты",
     "all_emails": "📧 Все почты",
     "all": "🗑 Всё",
@@ -348,6 +357,7 @@ def get_cache_stats_text() -> str:
     """Получить текст со статистикой кэша"""
     account_stats = account_cache.get_stats()
     email_stats = email_cache.get_stats()
+    number_stats = number_cache.get_stats()
 
     lines = ["<b>📊 Текущее состояние буферов:</b>\n"]
 
@@ -361,6 +371,13 @@ def get_cache_stats_text() -> str:
     if email_stats:
         lines.append("\n<b>Почты:</b>")
         for key, stats in email_stats.items():
+            total = stats["available"] + stats["pending"] + stats["write_buffer"]
+            if total > 0:
+                lines.append(f"  {key}: {stats['available']}📥 {stats['pending']}⏳ {stats['write_buffer']}📝")
+
+    if number_stats:
+        lines.append("\n<b>Номера:</b>")
+        for key, stats in number_stats.items():
             total = stats["available"] + stats["pending"] + stats["write_buffer"]
             if total > 0:
                 lines.append(f"  {key}: {stats['available']}📥 {stats['pending']}⏳ {stats['write_buffer']}📝")
@@ -604,5 +621,288 @@ async def buffer_clear_back(
                 "🗑 <b>Очистка буфера почт</b>\n\n"
                 "Выберите ресурс:",
                 reply_markup=get_buffer_clear_emails_keyboard(),
+                parse_mode="HTML",
+            )
+
+
+# === Освобождение буфера (возврат в базу) ===
+
+# Маппинг ресурсов для освобождения
+RELEASE_ACCOUNT_KEYS = {
+    "vk": "vk_none",
+    "mamba_male": "mamba_male",
+    "mamba_female": "mamba_female",
+    "ok": "ok_none",
+}
+
+RELEASE_EMAIL_KEYS = {
+    "gmail_any": "gmail_any",
+    "gmail_domain": "gmail_gmail_domain",
+    "rambler": "rambler_none",
+}
+
+RELEASE_RESOURCE_NAMES = {
+    "vk": "🔵 VK",
+    "mamba_male": "🔴 Mamba (М)",
+    "mamba_female": "🔴 Mamba (Ж)",
+    "ok": "🟠 OK",
+    "gmail_any": "📧 Gmail (Обычные)",
+    "gmail_domain": "📧 Gmail (@gmail)",
+    "rambler": "📨 Rambler",
+    "all_accounts": "📦 Все аккаунты",
+    "all_emails": "📧 Все почты",
+}
+
+
+@router.message(Command("buffer_release"))
+async def cmd_buffer_release(message: Message, state: FSMContext):
+    """Освободить аккаунты из буфера — вернуть в таблицу базы (только для админа)"""
+    if message.from_user.id != settings.ADMIN_ID:
+        return
+
+    await state.clear()
+    await state.set_state(BufferReleaseStates.selecting_category)
+
+    stats_text = get_cache_stats_text()
+
+    await message.answer(
+        f"🔄 <b>Освобождение буфера</b>\n\n"
+        f"{stats_text}\n\n"
+        f"Эта команда вернёт <b>готовые к выдаче</b> записи (📥) обратно в таблицу базы.\n\n"
+        f"Выберите категорию:",
+        reply_markup=get_buffer_release_category_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(BufferReleaseCategoryCallback.filter(), BufferReleaseStates.selecting_category)
+async def buffer_release_category(
+    callback: CallbackQuery,
+    callback_data: BufferReleaseCategoryCallback,
+    state: FSMContext,
+):
+    """Выбор категории для освобождения"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    await callback.answer()
+    category = callback_data.category
+    await state.update_data(category=category)
+    await state.set_state(BufferReleaseStates.selecting_resource)
+
+    if category == "accounts":
+        await callback.message.edit_text(
+            "🔄 <b>Освобождение аккаунтов</b>\n\n"
+            "Выберите ресурс:",
+            reply_markup=get_buffer_release_accounts_keyboard(),
+            parse_mode="HTML",
+        )
+    elif category == "emails":
+        await callback.message.edit_text(
+            "🔄 <b>Освобождение почт</b>\n\n"
+            "Выберите ресурс:",
+            reply_markup=get_buffer_release_emails_keyboard(),
+            parse_mode="HTML",
+        )
+    else:  # numbers
+        await callback.message.edit_text(
+            "🔄 <b>Освобождение номеров</b>\n\n"
+            "Выберите действие:",
+            reply_markup=get_buffer_release_numbers_keyboard(),
+            parse_mode="HTML",
+        )
+
+
+@router.callback_query(BufferReleaseResourceCallback.filter(), BufferReleaseStates.selecting_resource)
+async def buffer_release_resource(
+    callback: CallbackQuery,
+    callback_data: BufferReleaseResourceCallback,
+    state: FSMContext,
+):
+    """Выбор ресурса для освобождения"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    await callback.answer()
+    resource = callback_data.resource
+    await state.update_data(resource=resource)
+    await state.set_state(BufferReleaseStates.confirming)
+
+    resource_name = RELEASE_RESOURCE_NAMES.get(resource, resource)
+
+    # Подсчёт записей для освобождения
+    count = 0
+    description = "Записи будут возвращены в таблицу базы."
+
+    if resource == "all_accounts":
+        for key in RELEASE_ACCOUNT_KEYS.values():
+            stats = account_cache.get_stats().get(key, {})
+            count += stats.get("available", 0)
+    elif resource == "all_emails":
+        for key in RELEASE_EMAIL_KEYS.values():
+            stats = email_cache.get_stats().get(key, {})
+            count += stats.get("available", 0)
+    elif resource == "all_numbers":
+        resource_name = "📱 Все номера"
+        for key, stats in number_cache.get_stats().items():
+            count += stats.get("available", 0)
+    elif resource == "outdated_numbers":
+        resource_name = "🗓 Устаревшие номера"
+        description = "Устаревшие номера (не сегодняшние) будут возвращены в таблицу ПЕРЕД сегодняшними."
+        # Подсчёт устаревших номеров
+        from datetime import date
+        from bot.services.number_service import parse_date
+        today = date.today()
+        for key, numbers in number_cache._available.items():
+            for num in numbers:
+                if parse_date(num.date_added) != today:
+                    count += 1
+    elif resource in RELEASE_ACCOUNT_KEYS:
+        key = RELEASE_ACCOUNT_KEYS[resource]
+        stats = account_cache.get_stats().get(key, {})
+        count = stats.get("available", 0)
+    elif resource in RELEASE_EMAIL_KEYS:
+        key = RELEASE_EMAIL_KEYS[resource]
+        stats = email_cache.get_stats().get(key, {})
+        count = stats.get("available", 0)
+
+    await callback.message.edit_text(
+        f"🔄 <b>Освобождение буфера</b>\n\n"
+        f"Ресурс: <b>{resource_name}</b>\n"
+        f"Записей для возврата: <b>{count}</b>\n\n"
+        f"{description}\n\n"
+        f"Подтвердить?",
+        reply_markup=get_buffer_release_confirm_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(BufferReleaseConfirmCallback.filter(), BufferReleaseStates.confirming)
+async def buffer_release_confirm(
+    callback: CallbackQuery,
+    callback_data: BufferReleaseConfirmCallback,
+    state: FSMContext,
+):
+    """Подтверждение освобождения"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    action = callback_data.action
+    data = await state.get_data()
+    resource = data.get("resource")
+
+    if action == "cancel":
+        await callback.answer("❌ Отменено")
+        await state.clear()
+        await callback.message.edit_text("❌ Освобождение отменено")
+        return
+
+    await callback.answer("⏳ Освобождаю...")
+
+    try:
+        total = 0
+        resource_name = RELEASE_RESOURCE_NAMES.get(resource, resource)
+        extra_info = ""
+
+        if resource == "all_accounts":
+            for key in RELEASE_ACCOUNT_KEYS.values():
+                result = await account_cache.release_to_sheets(key)
+                total += result.get("available", 0)
+        elif resource == "all_emails":
+            for key in RELEASE_EMAIL_KEYS.values():
+                result = await email_cache.release_to_sheets(key)
+                total += result.get("available", 0)
+        elif resource == "all_numbers":
+            resource_name = "📱 Все номера"
+            result = await number_cache.release_to_sheets()
+            total = result.get("available", 0)
+        elif resource == "outdated_numbers":
+            resource_name = "🗓 Устаревшие номера"
+            result = await number_cache.release_outdated_to_sheets()
+            total = sum(result.values())
+            extra_info = "\nУстаревшие номера возвращены ПЕРЕД сегодняшними."
+        elif resource in RELEASE_ACCOUNT_KEYS:
+            key = RELEASE_ACCOUNT_KEYS[resource]
+            result = await account_cache.release_to_sheets(key)
+            total = result.get("available", 0)
+        elif resource in RELEASE_EMAIL_KEYS:
+            key = RELEASE_EMAIL_KEYS[resource]
+            result = await email_cache.release_to_sheets(key)
+            total = result.get("available", 0)
+
+        await state.clear()
+
+        if total > 0:
+            await callback.message.edit_text(
+                f"✅ <b>Освобождено: {total}</b>\n\n"
+                f"Ресурс: {resource_name}\n"
+                f"Записи возвращены в таблицу базы.{extra_info}",
+                parse_mode="HTML",
+            )
+        else:
+            await callback.message.edit_text(
+                f"ℹ️ Нет записей для освобождения\n\n"
+                f"Ресурс: {resource_name}",
+                parse_mode="HTML",
+            )
+
+    except Exception as e:
+        logger.error(f"Error releasing: {e}")
+        await state.clear()
+        await callback.message.edit_text(f"❌ Ошибка: {e}")
+
+
+@router.callback_query(BufferReleaseBackCallback.filter())
+async def buffer_release_back(
+    callback: CallbackQuery,
+    callback_data: BufferReleaseBackCallback,
+    state: FSMContext,
+):
+    """Кнопка назад в освобождении буфера"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+
+    await callback.answer()
+    to = callback_data.to
+
+    if to == "category":
+        await state.set_state(BufferReleaseStates.selecting_category)
+        stats_text = get_cache_stats_text()
+        await callback.message.edit_text(
+            f"🔄 <b>Освобождение буфера</b>\n\n"
+            f"{stats_text}\n\n"
+            f"Эта команда вернёт <b>готовые к выдаче</b> записи (📥) обратно в таблицу базы.\n\n"
+            f"Выберите категорию:",
+            reply_markup=get_buffer_release_category_keyboard(),
+            parse_mode="HTML",
+        )
+    elif to == "resource":
+        data = await state.get_data()
+        category = data.get("category")
+        await state.set_state(BufferReleaseStates.selecting_resource)
+
+        if category == "accounts":
+            await callback.message.edit_text(
+                "🔄 <b>Освобождение аккаунтов</b>\n\n"
+                "Выберите ресурс:",
+                reply_markup=get_buffer_release_accounts_keyboard(),
+                parse_mode="HTML",
+            )
+        elif category == "emails":
+            await callback.message.edit_text(
+                "🔄 <b>Освобождение почт</b>\n\n"
+                "Выберите ресурс:",
+                reply_markup=get_buffer_release_emails_keyboard(),
+                parse_mode="HTML",
+            )
+        else:  # numbers
+            await callback.message.edit_text(
+                "🔄 <b>Освобождение номеров</b>\n\n"
+                "Выберите действие:",
+                reply_markup=get_buffer_release_numbers_keyboard(),
                 parse_mode="HTML",
             )

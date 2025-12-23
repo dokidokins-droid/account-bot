@@ -46,6 +46,13 @@ class BufferClearStates(StatesGroup):
     confirming = State()  # Подтверждение
 
 
+class BufferReleaseStates(StatesGroup):
+    """Состояния для освобождения буфера (возврат в базу, админ)"""
+    selecting_category = State()  # Аккаунты / Почты
+    selecting_resource = State()  # Конкретный ресурс
+    confirming = State()  # Подтверждение
+
+
 class ProxyStates(StatesGroup):
     """Состояния для работы с прокси"""
     # Главное меню прокси
@@ -58,7 +65,7 @@ class ProxyStates(StatesGroup):
     add_selecting_duration = State()  # Выбор срока действия
 
     # Получение прокси
-    get_selecting_resource = State()  # Выбор ресурса
+    get_selecting_resources = State()  # Множественный выбор ресурсов
     get_selecting_country = State()  # Выбор страны (сетка с флагами)
     get_selecting_proxy = State()  # Выбор конкретного прокси (с пагинацией)
     get_multiselecting = State()  # Множественный выбор прокси (с чекбоксами)

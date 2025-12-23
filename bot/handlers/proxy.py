@@ -17,6 +17,8 @@ from bot.keyboards.callbacks import (
     ProxyTypeCallback,
     ProxyResourceToggleCallback,
     ProxyResourceConfirmCallback,
+    ProxyGetResourceToggleCallback,
+    ProxyGetResourceConfirmCallback,
     ProxyToggleCallback,
     ProxyConfirmMultiCallback,
 )
@@ -29,6 +31,7 @@ from bot.keyboards.proxy_keyboards import (
     get_proxy_back_keyboard,
     get_proxy_type_keyboard,
     get_proxy_resource_multi_keyboard,
+    get_proxy_resource_multi_keyboard_get,
     get_proxy_list_multi_keyboard,
 )
 from bot.keyboards.inline import get_resource_keyboard
@@ -79,11 +82,13 @@ async def proxy_menu_action(
         )
 
     elif action == "get":
-        await state.set_state(ProxyStates.get_selecting_resource)
+        await state.update_data(get_selected_resources=[])
+        await state.set_state(ProxyStates.get_selecting_resources)
         await callback.message.edit_text(
             "📥 <b>Получение прокси</b>\n\n"
-            "Выберите ресурс:",
-            reply_markup=get_proxy_resource_keyboard("get"),
+            "Выберите ресурс\\сы, для которых будет использован прокси:\n"
+            "<i>(можно выбрать несколько, если эти прокси для них используются)</i>",
+            reply_markup=get_proxy_resource_multi_keyboard_get([]),
             parse_mode="HTML",
         )
 
@@ -105,8 +110,15 @@ async def add_proxy_type(
     await callback.message.edit_text(
         f"➕ <b>Добавление прокси</b>\n"
         f"Тип: <b>{proxy_type.display_name}</b>\n\n"
-        "Отправьте прокси (каждый с новой строки):\n"
-        "<code>ip:port</code> или <code>ip:port:user:pass</code>",
+        "Отправьте прокси (каждый с новой строки).\n\n"
+        "<b>Поддерживаемые форматы:</b>\n"
+        "• <code>socks5://ip:port@user:pass</code>\n"
+        "• <code>http://user:pass@ip:port</code>\n"
+        "• <code>socks5://user:pass@ip:port</code>\n"
+        "• <code>user:pass@ip:port</code>\n"
+        "• <code>ip:port@user:pass</code>\n"
+        "• <code>ip:port:user:pass</code>\n"
+        "• <code>ip:port</code>",
         reply_markup=get_proxy_back_keyboard("type"),
         parse_mode="HTML",
     )
@@ -116,6 +128,8 @@ async def add_proxy_type(
 @router.message(ProxyStates.add_waiting_proxy)
 async def add_proxy_receive(message: Message, state: FSMContext):
     """Получение текста с прокси"""
+    from bot.utils.proxy_parser import parse_proxies
+
     text = message.text.strip()
 
     if not text:
@@ -126,23 +140,50 @@ async def add_proxy_receive(message: Message, state: FSMContext):
         return
 
     # Парсим прокси (каждая строка = отдельный прокси)
-    proxies = [line.strip() for line in text.split("\n") if line.strip()]
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
 
-    if not proxies:
+    if not lines:
         await message.answer(
             "❌ Не удалось распознать прокси",
             reply_markup=get_proxy_back_keyboard("type"),
         )
         return
 
+    # Парсим и нормализуем прокси
+    parsed, failed = parse_proxies(lines)
+
+    if not parsed:
+        await message.answer(
+            "❌ Не удалось распознать ни одного прокси\n\n"
+            "<b>Поддерживаемые форматы:</b>\n"
+            "• <code>socks5://ip:port@user:pass</code>\n"
+            "• <code>http://user:pass@ip:port</code>\n"
+            "• <code>socks5://user:pass@ip:port</code>\n"
+            "• <code>user:pass@ip:port</code>\n"
+            "• <code>ip:port@user:pass</code>\n"
+            "• <code>ip:port:user:pass</code>\n"
+            "• <code>ip:port</code>",
+            reply_markup=get_proxy_back_keyboard("type"),
+            parse_mode="HTML",
+        )
+        return
+
+    # Нормализуем в стандартный формат (ip:port:user:pass)
+    proxies = [p.to_standard_format() for p in parsed]
+
     # Сохраняем в state
     await state.update_data(proxies=proxies, selected_resources=[])
     await state.set_state(ProxyStates.add_selecting_resources)
 
+    # Формируем сообщение
+    result_text = f"✅ Распознано прокси: <b>{len(parsed)}</b>\n"
+    if failed:
+        result_text += f"⚠️ Не распознано: <b>{len(failed)}</b>\n"
+
+    result_text += "\nВыберите ресурсы, для которых использовались:\n<i>(можно выбрать несколько)</i>"
+
     await message.answer(
-        f"📝 Получено прокси: <b>{len(proxies)}</b>\n\n"
-        "Выберите ресурсы, для которых использовались:\n"
-        "<i>(можно выбрать несколько)</i>",
+        result_text,
         reply_markup=get_proxy_resource_multi_keyboard([]),
         parse_mode="HTML",
     )
@@ -275,43 +316,86 @@ async def add_proxy_duration(
     )
 
 
-# === Получение прокси ===
+# === Получение прокси: выбор ресурсов ===
 
-@router.callback_query(ProxyResourceCallback.filter(F.mode == "get"), ProxyStates.get_selecting_resource)
-async def get_proxy_resource(
+@router.callback_query(ProxyGetResourceToggleCallback.filter(), ProxyStates.get_selecting_resources)
+async def get_proxy_toggle_resource(
     callback: CallbackQuery,
-    callback_data: ProxyResourceCallback,
+    callback_data: ProxyGetResourceToggleCallback,
     state: FSMContext,
 ):
-    """Выбор ресурса при получении прокси"""
+    """Toggle выбора ресурса при получении прокси"""
+    resource = callback_data.resource
+    data = await state.get_data()
+    selected = data.get("get_selected_resources", [])
+
+    # Toggle ресурса
+    if resource in selected:
+        selected.remove(resource)
+    else:
+        selected.append(resource)
+
+    await state.update_data(get_selected_resources=selected)
+
+    # Обновляем клавиатуру
+    await callback.message.edit_text(
+        "📥 <b>Получение прокси</b>\n\n"
+        "Выберите ресурс\\сы, для которых будет использован прокси:\n"
+        "<i>(можно выбрать несколько, если эти прокси для них используются)</i>",
+        reply_markup=get_proxy_resource_multi_keyboard_get(selected),
+        parse_mode="HTML",
+    )
     await callback.answer()
 
-    resource = ProxyResource(callback_data.resource)
-    await state.update_data(get_resource=resource.value)
+
+@router.callback_query(ProxyGetResourceConfirmCallback.filter(), ProxyStates.get_selecting_resources)
+async def get_proxy_confirm_resources(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    """Подтверждение выбора ресурсов при получении прокси"""
+    data = await state.get_data()
+    selected = data.get("get_selected_resources", [])
+
+    if not selected:
+        await callback.answer("❌ Выберите хотя бы один ресурс!", show_alert=True)
+        return
+
+    # Формируем текст выбранных ресурсов
+    resource_names = []
+    for r in selected:
+        try:
+            resource_names.append(ProxyResource(r).button_text)
+        except ValueError:
+            resource_names.append(r)
+
+    await state.update_data(get_resources=selected)
 
     # Показываем загрузку
     await callback.message.edit_text(
-        f"📥 Ресурс: <b>{resource.display_name}</b>\n\n"
+        f"📥 Ресурсы: {', '.join(resource_names)}\n\n"
         "⏳ Загрузка...",
         parse_mode="HTML",
     )
 
     try:
         # Получаем страны с количеством
-        countries = await get_proxy_service().get_countries_with_counts(resource.value)
+        countries = await get_proxy_service().get_countries_with_counts(selected)
+
+        resources_text = ", ".join(resource_names)
 
         if not countries:
             await callback.message.edit_text(
-                f"📥 Ресурс: <b>{resource.display_name}</b>\n\n"
-                "❌ Нет доступных прокси для этого ресурса",
-                reply_markup=get_proxy_back_keyboard("resource"),
+                f"📥 Ресурсы: {resources_text}\n\n"
+                "❌ Нет доступных прокси для этих ресурсов",
+                reply_markup=get_proxy_back_keyboard("menu"),
                 parse_mode="HTML",
             )
             return
 
         await state.set_state(ProxyStates.get_selecting_country)
         await callback.message.edit_text(
-            f"📥 Ресурс: <b>{resource.display_name}</b>\n\n"
+            f"📥 Ресурсы: {resources_text}\n\n"
             "Выберите страну:",
             reply_markup=get_proxy_countries_keyboard(countries),
             parse_mode="HTML",
@@ -330,6 +414,10 @@ async def get_proxy_resource(
         except TelegramBadRequest:
             pass
 
+    await callback.answer()
+
+
+# === Получение прокси: выбор страны и прокси ===
 
 @router.callback_query(ProxyCountryCallback.filter(), ProxyStates.get_selecting_country)
 async def get_proxy_country(
@@ -342,7 +430,7 @@ async def get_proxy_country(
 
     country = callback_data.country
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
     user_id = callback.from_user.id
 
     await state.update_data(get_country=country)
@@ -350,7 +438,7 @@ async def get_proxy_country(
     try:
         # Получаем прокси с учётом резерваций текущего пользователя
         proxies, user_reserved = await get_proxy_service().get_proxies_for_user(
-            resource, country, user_id
+            resources, country, user_id
         )
         flag = get_country_flag(country)
         country_name = get_country_name(country)
@@ -406,14 +494,14 @@ async def switch_country_multiselect(
 
     country = callback_data.country
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
     user_id = callback.from_user.id
 
     await state.update_data(get_country=country)
 
     try:
         proxies, user_reserved = await get_proxy_service().get_proxies_for_user(
-            resource, country, user_id
+            resources, country, user_id
         )
         flag = get_country_flag(country)
         country_name = get_country_name(country)
@@ -459,10 +547,10 @@ async def proxy_pagination(
     page = callback_data.page
     country = callback_data.country
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
 
     try:
-        proxies = await get_proxy_service().get_proxies_by_country(resource, country)
+        proxies = await get_proxy_service().get_proxies_by_country(resources, country)
         flag = get_country_flag(country)
         country_name = get_country_name(country)
 
@@ -497,16 +585,16 @@ async def proxy_select(
     """Выбор конкретного прокси"""
     row_index = callback_data.row_index
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
     country = data.get("get_country", "")
     user_id = callback.from_user.id
 
-    # Сначала получаем информацию о прокси ДО записи текущего ресурса
+    # Сначала получаем информацию о прокси ДО записи текущих ресурсов
     proxy_before = await get_proxy_service().get_proxy_by_row(row_index)
     previous_used_for = proxy_before.used_for if proxy_before else []
 
-    # Пытаемся взять прокси (это добавит текущий ресурс в used_for)
-    proxy = await get_proxy_service().try_take_proxy(row_index, resource, user_id)
+    # Пытаемся взять прокси (это добавит текущие ресурсы в used_for)
+    proxy = await get_proxy_service().try_take_proxy(row_index, resources, user_id)
 
     if proxy is None:
         # Прокси уже занят - обновляем список
@@ -514,7 +602,7 @@ async def proxy_select(
 
         # Обновляем список
         try:
-            proxies = await get_proxy_service().get_proxies_by_country(resource, country)
+            proxies = await get_proxy_service().get_proxies_by_country(resources, country)
             flag = get_country_flag(country)
             country_name = get_country_name(country)
 
@@ -544,9 +632,17 @@ async def proxy_select(
 
     flag = get_country_flag(proxy.country)
     country_name = get_country_name(proxy.country)
-    resource_obj = ProxyResource(resource)
 
-    # Формируем список ПРЕДЫДУЩИХ использований (БЕЗ текущего ресурса)
+    # Формируем названия ресурсов для отображения
+    resource_names = []
+    for r in resources:
+        try:
+            resource_names.append(ProxyResource(r).button_text)
+        except ValueError:
+            resource_names.append(r)
+    resources_text = ", ".join(resource_names)
+
+    # Формируем список ПРЕДЫДУЩИХ использований
     used_for_names = []
     for r in previous_used_for:
         try:
@@ -563,7 +659,7 @@ async def proxy_select(
     proxy_type_display = "HTTP" if proxy.proxy_type == "http" else "SOCKS5"
 
     await callback.message.edit_text(
-        f"<b>🌐 Прокси получен</b> | {resource_obj.display_name}\n"
+        f"<b>🌐 Прокси получен</b> | {resources_text}\n"
         f"Страна: {flag} {country_name}\n"
         f"Тип: {proxy_type_display}\n"
         f"Осталось дней: {proxy.days_left}\n"
@@ -573,13 +669,15 @@ async def proxy_select(
         parse_mode="HTML",
     )
 
-    # Возвращаемся к выбору ресурса для получения прокси
+    # Возвращаемся к выбору ресурсов для получения прокси
     await state.clear()
-    await state.set_state(ProxyStates.get_selecting_resource)
+    await state.set_state(ProxyStates.get_selecting_resources)
+    await state.update_data(get_selected_resources=[])
     await callback.message.answer(
         "📥 <b>Получение прокси</b>\n\n"
-        "Выберите ресурс:",
-        reply_markup=get_proxy_resource_keyboard("get"),
+        "Выберите ресурс\\сы, для которых будет использован прокси:\n"
+        "<i>(можно выбрать несколько, если эти прокси для них используются)</i>",
+        reply_markup=get_proxy_resource_multi_keyboard_get([]),
         parse_mode="HTML",
     )
 
@@ -599,7 +697,7 @@ async def proxy_toggle_selection(
     user_id = callback.from_user.id
 
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
 
     service = get_proxy_service()
 
@@ -612,7 +710,7 @@ async def proxy_toggle_selection(
         await callback.answer("Убрано из выбора")
     else:
         # Не выбран - резервируем
-        reserved = await service.reserve_proxies([row_index], resource, user_id)
+        reserved = await service.reserve_proxies([row_index], resources, user_id)
         if reserved:
             await callback.answer("Добавлено в выбор")
         else:
@@ -620,7 +718,7 @@ async def proxy_toggle_selection(
 
     # Обновляем клавиатуру
     try:
-        proxies, user_reserved = await service.get_proxies_for_user(resource, country, user_id)
+        proxies, user_reserved = await service.get_proxies_for_user(resources, country, user_id)
         flag = get_country_flag(country)
         country_name = get_country_name(country)
 
@@ -655,12 +753,12 @@ async def proxy_pagination_multi(
     country = callback_data.country
     user_id = callback.from_user.id
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
 
     try:
         service = get_proxy_service()
         proxies, user_reserved = await service.get_proxies_for_user(
-            resource, country, user_id
+            resources, country, user_id
         )
         flag = get_country_flag(country)
         country_name = get_country_name(country)
@@ -694,7 +792,7 @@ async def proxy_confirm_multi(
     """Подтверждение множественного выбора прокси"""
     user_id = callback.from_user.id
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
 
     service = get_proxy_service()
 
@@ -714,7 +812,7 @@ async def proxy_confirm_multi(
     try:
         # Batch update - один API запрос для всех прокси
         taken, failed = await service.take_proxies_batch(
-            user_reservations, resource, user_id
+            user_reservations, resources, user_id
         )
 
         if not taken:
@@ -725,11 +823,17 @@ async def proxy_confirm_multi(
             await callback.answer()
             return
 
-        # Формируем результат с новым форматом
-        resource_obj = ProxyResource(resource)
+        # Формируем названия выбранных ресурсов
+        resource_names = []
+        for r in resources:
+            try:
+                resource_names.append(ProxyResource(r).button_text)
+            except ValueError:
+                resource_names.append(r)
+        resources_text = ", ".join(resource_names)
 
-        # Заголовок с иконкой ресурса
-        lines = [f"<b>✅ Получено прокси: {len(taken)}</b> | {resource_obj.button_text}\n"]
+        # Заголовок с иконками ресурсов
+        lines = [f"<b>✅ Получено прокси: {len(taken)}</b> | {resources_text}\n"]
 
         for proxy in taken:
             flag = get_country_flag(proxy.country)
@@ -763,13 +867,15 @@ async def proxy_confirm_multi(
         await callback.answer()
         return
 
-    # Возвращаемся к выбору ресурса
+    # Возвращаемся к выбору ресурсов
     await state.clear()
-    await state.set_state(ProxyStates.get_selecting_resource)
+    await state.set_state(ProxyStates.get_selecting_resources)
+    await state.update_data(get_selected_resources=[])
     await callback.message.answer(
         "📥 <b>Получение прокси</b>\n\n"
-        "Выберите ресурс:",
-        reply_markup=get_proxy_resource_keyboard("get"),
+        "Выберите ресурс\\сы, для которых будет использован прокси:\n"
+        "<i>(можно выбрать несколько, если эти прокси для них используются)</i>",
+        reply_markup=get_proxy_resource_multi_keyboard_get([]),
         parse_mode="HTML",
     )
 
@@ -834,22 +940,25 @@ async def proxy_back_to_resource(callback: CallbackQuery, state: FSMContext):
     await get_proxy_service().cancel_all_reservations(user_id)
 
     if current_state and "add_" in current_state:
-        mode = "add"
-        text = "➕ <b>Добавление прокси</b>\n\nВыберите ресурс:"
+        await state.set_state(ProxyStates.add_selecting_resources)
+        await state.update_data(selected_resources=[])
+        await callback.message.edit_text(
+            "➕ <b>Добавление прокси</b>\n\n"
+            "Выберите ресурсы, для которых использовались:\n"
+            "<i>(можно выбрать несколько)</i>",
+            reply_markup=get_proxy_resource_multi_keyboard([]),
+            parse_mode="HTML",
+        )
     else:
-        mode = "get"
-        text = "📥 <b>Получение прокси</b>\n\nВыберите ресурс:"
-
-    await state.set_state(
-        ProxyStates.add_selecting_resource if mode == "add"
-        else ProxyStates.get_selecting_resource
-    )
-
-    await callback.message.edit_text(
-        text,
-        reply_markup=get_proxy_resource_keyboard(mode),
-        parse_mode="HTML",
-    )
+        await state.set_state(ProxyStates.get_selecting_resources)
+        await state.update_data(get_selected_resources=[])
+        await callback.message.edit_text(
+            "📥 <b>Получение прокси</b>\n\n"
+            "Выберите ресурс\\сы, для которых будет использован прокси:\n"
+            "<i>(можно выбрать несколько, если эти прокси для них используются)</i>",
+            reply_markup=get_proxy_resource_multi_keyboard_get([]),
+            parse_mode="HTML",
+        )
     await callback.answer()
 
 
@@ -857,24 +966,32 @@ async def proxy_back_to_resource(callback: CallbackQuery, state: FSMContext):
 async def proxy_back_to_country_multiselect(callback: CallbackQuery, state: FSMContext):
     """Возврат к выбору страны БЕЗ сброса выбранных прокси"""
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
     user_id = callback.from_user.id
 
     # НЕ очищаем резервации - сохраняем выбор между странами
     all_reservations = await get_proxy_service().get_user_reservations(user_id)
     total_selected = len(all_reservations)
 
+    # Формируем названия выбранных ресурсов
+    resource_names = []
+    for r in resources:
+        try:
+            resource_names.append(ProxyResource(r).button_text)
+        except ValueError:
+            resource_names.append(r)
+    resources_text = ", ".join(resource_names) if resource_names else "не выбраны"
+
     # Остаёмся в режиме multiselecting для переключения между странами
     # Но показываем список стран
 
     try:
-        countries = await get_proxy_service().get_countries_with_counts(resource)
-        resource_obj = ProxyResource(resource)
+        countries = await get_proxy_service().get_countries_with_counts(resources)
 
         selected_text = f" | Выбрано: {total_selected}" if total_selected > 0 else ""
 
         await callback.message.edit_text(
-            f"📥 Ресурс: <b>{resource_obj.display_name}</b>{selected_text}\n\n"
+            f"📥 Ресурсы: {resources_text}{selected_text}\n\n"
             "Выберите страну:",
             reply_markup=get_proxy_countries_keyboard(countries),
             parse_mode="HTML",
@@ -899,16 +1016,24 @@ async def proxy_back_to_country_multiselect(callback: CallbackQuery, state: FSMC
 async def proxy_back_to_country(callback: CallbackQuery, state: FSMContext):
     """Возврат к выбору страны (из обычного режима)"""
     data = await state.get_data()
-    resource = data.get("get_resource", "")
+    resources = data.get("get_resources", [])
 
     await state.set_state(ProxyStates.get_selecting_country)
 
+    # Формируем названия выбранных ресурсов
+    resource_names = []
+    for r in resources:
+        try:
+            resource_names.append(ProxyResource(r).button_text)
+        except ValueError:
+            resource_names.append(r)
+    resources_text = ", ".join(resource_names) if resource_names else "не выбраны"
+
     try:
-        countries = await get_proxy_service().get_countries_with_counts(resource)
-        resource_obj = ProxyResource(resource)
+        countries = await get_proxy_service().get_countries_with_counts(resources)
 
         await callback.message.edit_text(
-            f"📥 Ресурс: <b>{resource_obj.display_name}</b>\n\n"
+            f"📥 Ресурсы: {resources_text}\n\n"
             "Выберите страну:",
             reply_markup=get_proxy_countries_keyboard(countries),
             parse_mode="HTML",

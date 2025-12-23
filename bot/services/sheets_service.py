@@ -345,6 +345,57 @@ class SheetsService:
             logger.error(f"Error batch deleting account rows: {e}")
             raise
 
+    async def append_accounts_to_base(
+        self, resource: Resource, gender: Gender, rows_data: List[List[str]]
+    ) -> None:
+        """
+        Добавить аккаунты в конец таблицы базы (для функции освобождения).
+
+        Args:
+            resource: Тип ресурса
+            gender: Пол
+            rows_data: Список строк данных (без даты - она добавляется автоматически)
+        """
+        if not rows_data:
+            return
+
+        try:
+            agc = await self._get_client()
+            ss = await agc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
+
+            sheet_name = self._get_sheet_name(resource, gender)
+            ws = await ss.worksheet(sheet_name)
+
+            # Получаем все данные
+            all_values = await ws.get_all_values()
+
+            # Находим последнюю ЗАПОЛНЕННУЮ строку
+            last_filled_row = 1  # Минимум заголовок
+            for i, row in enumerate(all_values, start=1):
+                if row and any(cell.strip() for cell in row if cell):
+                    last_filled_row = i
+
+            start_row = last_filled_row + 1
+
+            # Добавляем дату к каждой строке
+            date_str = datetime.now().strftime("%d.%m.%y")
+            rows_with_date = [[date_str] + row for row in rows_data]
+
+            # Вычисляем диапазон
+            end_row = start_row + len(rows_with_date) - 1
+            max_cols = max(len(row) for row in rows_with_date)
+            end_col = chr(ord('A') + max_cols - 1)
+            range_str = f"A{start_row}:{end_col}{end_row}"
+
+            # Записываем все строки одним batch запросом
+            await ws.update(range_str, rows_with_date, value_input_option="USER_ENTERED")
+
+            logger.info(f"Appended {len(rows_with_date)} accounts to {sheet_name} (rows {start_row}-{end_row})")
+
+        except Exception as e:
+            logger.error(f"Error appending accounts to base: {e}")
+            raise
+
     async def add_issued_accounts_batch(
         self,
         resource: Resource,

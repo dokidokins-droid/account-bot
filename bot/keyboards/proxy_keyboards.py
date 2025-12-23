@@ -13,6 +13,8 @@ from bot.keyboards.callbacks import (
     ProxyTypeCallback,
     ProxyResourceToggleCallback,
     ProxyResourceConfirmCallback,
+    ProxyGetResourceToggleCallback,
+    ProxyGetResourceConfirmCallback,
     ProxyToggleCallback,
     ProxyConfirmMultiCallback,
 )
@@ -45,18 +47,35 @@ def get_proxy_menu_keyboard() -> InlineKeyboardMarkup:
 def get_proxy_resource_keyboard(mode: str) -> InlineKeyboardMarkup:
     """Клавиатура выбора ресурса для прокси"""
     builder = InlineKeyboardBuilder()
-    for resource in ProxyResource:
+
+    # Все ресурсы кроме OTHER
+    main_resources = [r for r in ProxyResource if r != ProxyResource.OTHER]
+    for resource in main_resources:
         builder.button(
             text=resource.button_text,
             callback_data=ProxyResourceCallback(resource=resource.value, mode=mode),
         )
+
+    # OTHER (Другие) на отдельной строке
+    builder.button(
+        text=ProxyResource.OTHER.button_text,
+        callback_data=ProxyResourceCallback(resource=ProxyResource.OTHER.value, mode=mode),
+    )
+
     # Кнопка назад: для get - в главное меню ресурсов, для add - в меню прокси
     back_to = "main" if mode == "get" else "menu"
     builder.button(
         text="« Назад",
         callback_data=ProxyBackCallback(to=back_to),
     )
-    builder.adjust(2, 2, 2, 1, 1)
+
+    # Динамический layout: основные ресурсы по 2, затем Другие и Назад по 1
+    rows = [2] * (len(main_resources) // 2)
+    if len(main_resources) % 2:
+        rows.append(1)
+    rows.extend([1, 1])  # Другие + Назад
+
+    builder.adjust(*rows)
     return builder.as_markup()
 
 
@@ -194,34 +213,88 @@ def get_proxy_resource_multi_keyboard(selected: List[str]) -> InlineKeyboardMark
     """Клавиатура множественного выбора ресурсов для прокси"""
     builder = InlineKeyboardBuilder()
 
-    for resource in ProxyResource:
-        # Добавляем галочку если ресурс выбран
+    # Все ресурсы кроме OTHER
+    main_resources = [r for r in ProxyResource if r != ProxyResource.OTHER]
+    for resource in main_resources:
         check = "✅ " if resource.value in selected else ""
         builder.button(
             text=f"{check}{resource.button_text}",
             callback_data=ProxyResourceToggleCallback(resource=resource.value),
         )
 
-    # Кнопка подтвердить (только если что-то выбрано)
-    if selected:
-        builder.button(
-            text="✔️ Подтвердить",
-            callback_data=ProxyResourceConfirmCallback(),
-        )
-
-    # Кнопка назад
+    # OTHER (Другие) на отдельной строке
+    check = "✅ " if ProxyResource.OTHER.value in selected else ""
     builder.button(
-        text="« Назад",
-        callback_data=ProxyBackCallback(to="type"),
+        text=f"{check}{ProxyResource.OTHER.button_text}",
+        callback_data=ProxyResourceToggleCallback(resource=ProxyResource.OTHER.value),
     )
 
-    # Раскладка: ресурсы по 2 в ряд, затем кнопки подтвердить и назад
-    rows = [2] * (len(ProxyResource) // 2)
-    if len(ProxyResource) % 2:
-        rows.append(1)
+    # Кнопка подтвердить ИЛИ назад (заменяют друг друга)
     if selected:
-        rows.append(1)  # Кнопка подтвердить
-    rows.append(1)  # Кнопка назад
+        builder.button(
+            text="✅ Подтвердить",
+            callback_data=ProxyResourceConfirmCallback(),
+        )
+    else:
+        builder.button(
+            text="« Назад",
+            callback_data=ProxyBackCallback(to="type"),
+        )
+
+    # Динамический layout: основные ресурсы по 2, затем Другие, Подтвердить или Назад
+    rows = [2] * (len(main_resources) // 2)
+    if len(main_resources) % 2:
+        rows.append(1)
+    rows.append(1)  # Другие
+    rows.append(1)  # Подтвердить или Назад
+
+    builder.adjust(*rows)
+    return builder.as_markup()
+
+
+def get_proxy_resource_multi_keyboard_get(selected: List[str]) -> InlineKeyboardMarkup:
+    """
+    Клавиатура множественного выбора ресурсов при ПОЛУЧЕНИИ прокси.
+
+    Аналогична get_proxy_resource_multi_keyboard, но с другой кнопкой "Назад"
+    и другими callback-ами.
+    """
+    builder = InlineKeyboardBuilder()
+
+    # Все ресурсы кроме OTHER
+    main_resources = [r for r in ProxyResource if r != ProxyResource.OTHER]
+    for resource in main_resources:
+        check = "✅ " if resource.value in selected else ""
+        builder.button(
+            text=f"{check}{resource.button_text}",
+            callback_data=ProxyGetResourceToggleCallback(resource=resource.value),
+        )
+
+    # OTHER (Другие) на отдельной строке
+    check = "✅ " if ProxyResource.OTHER.value in selected else ""
+    builder.button(
+        text=f"{check}{ProxyResource.OTHER.button_text}",
+        callback_data=ProxyGetResourceToggleCallback(resource=ProxyResource.OTHER.value),
+    )
+
+    # Кнопка подтвердить ИЛИ назад (заменяют друг друга)
+    if selected:
+        builder.button(
+            text="✅ Подтвердить",
+            callback_data=ProxyGetResourceConfirmCallback(),
+        )
+    else:
+        builder.button(
+            text="« Назад",
+            callback_data=ProxyBackCallback(to="menu"),
+        )
+
+    # Динамический layout
+    rows = [2] * (len(main_resources) // 2)
+    if len(main_resources) % 2:
+        rows.append(1)
+    rows.append(1)  # Другие
+    rows.append(1)  # Подтвердить или Назад
 
     builder.adjust(*rows)
     return builder.as_markup()

@@ -280,6 +280,7 @@ async def select_email_quantity_and_issue(
                 "Попробуйте другие параметры."
             )
             await state.clear()
+            await state.set_state(AccountFlowStates.selecting_resource)
             await callback.message.answer(
                 "📦 <b>Выдача аккаунтов</b>\n\n"
                 "Выберите ресурс:",
@@ -345,6 +346,7 @@ async def select_email_quantity_and_issue(
         )
 
     await state.clear()
+    await state.set_state(AccountFlowStates.selecting_resource)
 
 
 # === Кнопки назад ===

@@ -38,7 +38,7 @@ def get_number_resource_keyboard(selected: List[str]) -> InlineKeyboardMarkup:
     # Если выбран хотя бы один ресурс — "Подтвердить", иначе — "Назад"
     if selected:
         builder.button(
-            text="✔️ Подтвердить",
+            text="✅ Подтвердить",
             callback_data=NumberResourceConfirmCallback(),
         )
     else:

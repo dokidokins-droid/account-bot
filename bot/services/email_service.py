@@ -773,6 +773,89 @@ class EmailCache:
 
         return cleared
 
+    async def release_to_sheets(self, key: str = None) -> Dict[str, int]:
+        """
+        Освободить почты из буфера — вернуть в таблицу базы.
+
+        Args:
+            key: Ключ ресурса (например "gmail_any") или None для всех
+
+        Returns:
+            Словарь с количеством возвращённых элементов
+        """
+        released = {"available": 0}
+
+        keys_to_process = [key] if key else list(self._available.keys())
+
+        for cache_key in keys_to_process:
+            available = self._available.get(cache_key, deque())
+            if not available:
+                continue
+
+            # Забираем все почты из буфера
+            emails_to_release = list(available)
+            if not emails_to_release:
+                continue
+
+            # Определяем email_resource и email_type из ключа
+            try:
+                resource_str, type_str = cache_key.split("_", 1)
+                email_resource = EmailResource(resource_str)
+                email_type = Gender(type_str) if type_str and type_str != "none" else None
+            except (ValueError, AttributeError):
+                logger.error(f"Invalid email cache key: {cache_key}")
+                continue
+
+            sheet_name = self._get_sheet_name(email_resource, email_type)
+
+            try:
+                gc = await agcm.authorize()
+                spreadsheet = await gc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
+
+                try:
+                    worksheet = await spreadsheet.worksheet(sheet_name)
+                except Exception as e:
+                    logger.error(f"Sheet '{sheet_name}' not found: {e}")
+                    continue
+
+                # Получаем все данные
+                all_values = await worksheet.get_all_values()
+
+                # Находим последнюю ЗАПОЛНЕННУЮ строку
+                last_filled_row = 1
+                for i, row in enumerate(all_values, start=1):
+                    if row and any(cell.strip() for cell in row if cell):
+                        last_filled_row = i
+
+                start_row = last_filled_row + 1
+
+                # Подготавливаем строки
+                date_str = datetime.now().strftime("%d.%m.%y")
+                rows_with_date = []
+                for email in emails_to_release:
+                    row = [date_str, email.login, email.password, email.extra_info]
+                    rows_with_date.append(row)
+
+                if rows_with_date:
+                    # Вычисляем диапазон
+                    end_row = start_row + len(rows_with_date) - 1
+                    range_str = f"A{start_row}:D{end_row}"
+
+                    # Записываем все строки одним batch запросом
+                    await worksheet.update(range_str, rows_with_date, value_input_option="USER_ENTERED")
+
+                    released["available"] += len(rows_with_date)
+                    # Очищаем буфер после успешной записи
+                    self._available[cache_key] = deque()
+                    logger.info(f"Released {len(rows_with_date)} emails for {cache_key} back to base")
+
+            except Exception as e:
+                logger.error(f"Error releasing emails for {cache_key}: {e}")
+
+        # Сохраняем состояние после освобождения
+        self.save_state()
+        return released
+
 
 # Глобальный кэш
 email_cache = EmailCache()

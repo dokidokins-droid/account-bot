@@ -558,15 +558,15 @@ def get_buffer_clear_accounts_keyboard() -> InlineKeyboardMarkup:
         callback_data=BufferClearResourceCallback(resource="vk"),
     )
     builder.button(
-        text="🟠 Мамба М",
+        text="🔴 Мамба М",
         callback_data=BufferClearResourceCallback(resource="mamba_male"),
     )
     builder.button(
-        text="🟠 Мамба Ж",
+        text="🔴 Мамба Ж",
         callback_data=BufferClearResourceCallback(resource="mamba_female"),
     )
     builder.button(
-        text="🟡 Одноклассники",
+        text="🟠 Одноклассники",
         callback_data=BufferClearResourceCallback(resource="ok"),
     )
     builder.button(
@@ -585,15 +585,15 @@ def get_buffer_clear_emails_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура выбора ресурса почт для очистки"""
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🟢 Gmail Обычные",
+        text="📧 Gmail Обычные",
         callback_data=BufferClearResourceCallback(resource="gmail_any"),
     )
     builder.button(
-        text="🟢 Gmail gmail.com",
+        text="📧 Gmail gmail.com",
         callback_data=BufferClearResourceCallback(resource="gmail_domain"),
     )
     builder.button(
-        text="🔵 Рамблер",
+        text="📨 Рамблер",
         callback_data=BufferClearResourceCallback(resource="rambler"),
     )
     builder.button(
@@ -645,6 +645,127 @@ def get_buffer_clear_confirm_keyboard() -> InlineKeyboardMarkup:
     builder.button(
         text="❌ Отмена",
         callback_data=BufferClearConfirmCallback(action="cancel"),
+    )
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+# === Клавиатуры для освобождения буфера (возврат в базу) ===
+
+from bot.keyboards.callbacks import (
+    BufferReleaseCategoryCallback,
+    BufferReleaseResourceCallback,
+    BufferReleaseConfirmCallback,
+    BufferReleaseBackCallback,
+)
+
+
+def get_buffer_release_category_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора категории для освобождения буфера"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="📦 Аккаунты",
+        callback_data=BufferReleaseCategoryCallback(category="accounts"),
+    )
+    builder.button(
+        text="📧 Почты",
+        callback_data=BufferReleaseCategoryCallback(category="emails"),
+    )
+    builder.button(
+        text="📱 Номера",
+        callback_data=BufferReleaseCategoryCallback(category="numbers"),
+    )
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+def get_buffer_release_numbers_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора ресурса номеров для освобождения"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔄 Освободить ВСЕ номера",
+        callback_data=BufferReleaseResourceCallback(resource="all_numbers"),
+    )
+    builder.button(
+        text="🗓 Освободить устаревшие",
+        callback_data=BufferReleaseResourceCallback(resource="outdated_numbers"),
+    )
+    builder.button(
+        text="◀️ Назад",
+        callback_data=BufferReleaseBackCallback(to="category"),
+    )
+    builder.adjust(1, 1, 1)
+    return builder.as_markup()
+
+
+def get_buffer_release_accounts_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора ресурса аккаунтов для освобождения"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔵 VK",
+        callback_data=BufferReleaseResourceCallback(resource="vk"),
+    )
+    builder.button(
+        text="🔴 Mamba (М)",
+        callback_data=BufferReleaseResourceCallback(resource="mamba_male"),
+    )
+    builder.button(
+        text="🔴 Mamba (Ж)",
+        callback_data=BufferReleaseResourceCallback(resource="mamba_female"),
+    )
+    builder.button(
+        text="🟠 OK",
+        callback_data=BufferReleaseResourceCallback(resource="ok"),
+    )
+    builder.button(
+        text="🔄 Освободить ВСЕ аккаунты",
+        callback_data=BufferReleaseResourceCallback(resource="all_accounts"),
+    )
+    builder.button(
+        text="◀️ Назад",
+        callback_data=BufferReleaseBackCallback(to="category"),
+    )
+    builder.adjust(2, 2, 1, 1)
+    return builder.as_markup()
+
+
+def get_buffer_release_emails_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора ресурса почт для освобождения"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="📧 Gmail (Обычные)",
+        callback_data=BufferReleaseResourceCallback(resource="gmail_any"),
+    )
+    builder.button(
+        text="📧 Gmail (@gmail)",
+        callback_data=BufferReleaseResourceCallback(resource="gmail_domain"),
+    )
+    builder.button(
+        text="📨 Rambler",
+        callback_data=BufferReleaseResourceCallback(resource="rambler"),
+    )
+    builder.button(
+        text="🔄 Освободить ВСЕ почты",
+        callback_data=BufferReleaseResourceCallback(resource="all_emails"),
+    )
+    builder.button(
+        text="◀️ Назад",
+        callback_data=BufferReleaseBackCallback(to="category"),
+    )
+    builder.adjust(2, 1, 1, 1)
+    return builder.as_markup()
+
+
+def get_buffer_release_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения освобождения"""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Освободить",
+        callback_data=BufferReleaseConfirmCallback(action="confirm"),
+    )
+    builder.button(
+        text="❌ Отмена",
+        callback_data=BufferReleaseConfirmCallback(action="cancel"),
     )
     builder.adjust(2)
     return builder.as_markup()

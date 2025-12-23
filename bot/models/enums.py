@@ -21,9 +21,9 @@ class Resource(str, Enum):
     def emoji(self) -> str:
         emojis = {
             "vk": "🔵",
-            "mamba": "🟠",
-            "ok": "🟡",
-            "gmail": "🟢",
+            "mamba": "🔴",
+            "ok": "🟠",
+            "gmail": "📧",
         }
         return emojis[self.value]
 
@@ -113,7 +113,12 @@ class ProxyResource(str, Enum):
     LOVEPLANET = "loveplanet"
     TEAMO = "teamo"
     BADOO = "badoo"
-    TINDER = "tinder"
+    BEBOO = "beboo"
+    LOLOO = "loloo"
+    TOPFACE = "topface"
+    LOVERU = "loveru"
+    FOTOSTRANA = "fotostrana"
+    GALAXY = "galaxy"
     OTHER = "other"
 
     @property
@@ -125,7 +130,12 @@ class ProxyResource(str, Enum):
             "loveplanet": "LovePlanet",
             "teamo": "Teamo",
             "badoo": "Badoo",
-            "tinder": "Tinder",
+            "beboo": "Beboo",
+            "loloo": "Loloo",
+            "topface": "Topface",
+            "loveru": "Love.ru",
+            "fotostrana": "Фотострана",
+            "galaxy": "Galaxy",
             "other": "Другие",
         }
         return names[self.value]
@@ -134,12 +144,17 @@ class ProxyResource(str, Enum):
     def emoji(self) -> str:
         emojis = {
             "vk": "🔵",
-            "mamba": "🟠",
-            "ok": "🟡",
-            "loveplanet": "💜",
-            "teamo": "❤️",
+            "mamba": "🔴",
+            "ok": "🟠",
+            "loveplanet": "💙",
+            "teamo": "💚",
             "badoo": "🟣",
-            "tinder": "🔥",
+            "beboo": "🟧",
+            "loloo": "🟦",
+            "topface": "🎭",
+            "loveru": "🔺",
+            "fotostrana": "📷",
+            "galaxy": "🚀",
             "other": "🔘",
         }
         return emojis[self.value]
@@ -209,9 +224,9 @@ class NumberResource(str, Enum):
     @property
     def emoji(self) -> str:
         emojis = {
-            "beboo": "🟠",
-            "loloo": "🔵",
-            "tabor": "🟤",
+            "beboo": "🟧",
+            "loloo": "🟦",
+            "tabor": "🟥",
         }
         return emojis[self.value]
 

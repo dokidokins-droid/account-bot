@@ -157,7 +157,17 @@ class ProxyResourceToggleCallback(CallbackData, prefix="prx_tog"):
 
 
 class ProxyResourceConfirmCallback(CallbackData, prefix="prx_conf"):
-    """Подтверждение выбора ресурсов"""
+    """Подтверждение выбора ресурсов (при добавлении)"""
+    pass
+
+
+class ProxyGetResourceToggleCallback(CallbackData, prefix="prx_get_tog"):
+    """Toggle выбора ресурса при ПОЛУЧЕНИИ прокси (множественный выбор)"""
+    resource: str
+
+
+class ProxyGetResourceConfirmCallback(CallbackData, prefix="prx_get_conf"):
+    """Подтверждение выбора ресурсов при ПОЛУЧЕНИИ прокси"""
     pass
 
 
@@ -307,3 +317,25 @@ class BufferClearConfirmCallback(CallbackData, prefix="buf_conf"):
 class BufferClearBackCallback(CallbackData, prefix="buf_back"):
     """Callback для кнопки назад в очистке буфера"""
     to: str  # category, resource, type
+
+
+# === Освобождение буфера (возврат в базу) ===
+
+class BufferReleaseCategoryCallback(CallbackData, prefix="rel_cat"):
+    """Callback для выбора категории освобождения"""
+    category: str  # accounts, emails
+
+
+class BufferReleaseResourceCallback(CallbackData, prefix="rel_res"):
+    """Callback для выбора ресурса освобождения"""
+    resource: str  # vk, mamba_male, mamba_female, ok, gmail_any, gmail_domain, rambler, all_accounts, all_emails
+
+
+class BufferReleaseConfirmCallback(CallbackData, prefix="rel_conf"):
+    """Callback для подтверждения освобождения"""
+    action: str  # confirm, cancel
+
+
+class BufferReleaseBackCallback(CallbackData, prefix="rel_back"):
+    """Callback для кнопки назад в освобождении буфера"""
+    to: str  # category, resource

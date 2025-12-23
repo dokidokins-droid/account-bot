@@ -197,6 +197,15 @@ class NumberCache:
         self._save_task: Optional[asyncio.Task] = None
         self._issued_sync_task: Optional[asyncio.Task] = None
 
+        # Флаг ошибки доступа к таблице выдачи
+        self._issued_sheet_permission_error: bool = False
+
+        # Таймаут для pending номеров (10 минут)
+        self._pending_timeout: int = 600  # секунд
+        # Кулдаун между проверками pending (1 час)
+        self._pending_cleanup_cooldown: int = 3600  # секунд
+        self._last_pending_cleanup: float = 0
+
         self._load_settings()
 
     def _load_settings(self) -> None:
@@ -342,13 +351,24 @@ class NumberCache:
 
         Возвращает список номеров с их ID для последующего feedback.
         Обновление used_for происходит batch'ем в фоне.
+
+        ВАЖНО: При режиме today_only=True, если в буфере есть устаревшие номера,
+        они автоматически возвращаются в таблицу перед сегодняшними.
         """
         key = self._get_resource_key(resources)
         requested_resources = {r.lower() for r in resources}
         issue_lock = await self._get_issue_lock(key)
 
+        # Очистка старых pending (с кулдауном 1 час)
+        await self._cleanup_expired_pending()
+
         async with issue_lock:
             available = self._available.get(key, deque())
+
+            # Автоматическая очистка устаревших номеров при today_only=True
+            if self._today_only and available:
+                await self._check_and_release_outdated(key)
+                available = self._available.get(key, deque())
 
             # Если не хватает — загружаем
             if len(available) < quantity:
@@ -407,6 +427,103 @@ class NumberCache:
             await self._load_numbers(resources)
         except Exception as e:
             logger.error(f"Background refill error: {e}")
+
+    async def _cleanup_expired_pending(self) -> None:
+        """
+        Очистка expired pending номеров (авто-feedback "Рабочий").
+        Вызывается при запросе номеров с кулдауном 1 час.
+        """
+        now = time.time()
+
+        # Проверяем кулдаун
+        if now - self._last_pending_cleanup < self._pending_cleanup_cooldown:
+            return
+
+        self._last_pending_cleanup = now
+
+        # Находим истёкшие pending (более 10 минут)
+        expired_pending = []
+        for num_id, pending in list(self._pending.items()):
+            if now - pending.issued_at > self._pending_timeout:
+                expired_pending.append((num_id, pending))
+
+        if not expired_pending:
+            return
+
+        # Автоматически выставляем статус "Рабочий"
+        from bot.models.enums import NumberStatus
+        for num_id, pending in expired_pending:
+            logger.info(
+                f"Auto-feedback for {pending.number}: 'working' "
+                f"(no feedback for {int(now - pending.issued_at)}s)"
+            )
+            await self.update_number_status(pending.number, NumberStatus.WORKING.value)
+
+        logger.info(f"Cleaned up {len(expired_pending)} expired pending numbers")
+
+    async def _check_and_release_outdated(self, key: str) -> int:
+        """
+        Проверить наличие устаревших номеров в буфере и вернуть их в таблицу.
+        Вызывается при первой попытке выдачи, когда today_only=True.
+
+        Returns:
+            Количество возвращённых номеров
+        """
+        today = date.today()
+
+        if key not in self._available:
+            return 0
+
+        available = self._available[key]
+        if not available:
+            return 0
+
+        # Проверяем первый номер - если он устаревший, значит все устаревшие
+        # (номера загружаются в порядке из таблицы)
+        first = available[0]
+        first_date = parse_date(first.date_added)
+
+        if first_date == today:
+            # Все номера актуальные
+            return 0
+
+        # Есть устаревшие - разделяем
+        outdated_numbers = []
+        fresh_numbers = deque()
+
+        while available:
+            cached = available.popleft()
+            row_date = parse_date(cached.date_added)
+            if row_date != today:
+                outdated_numbers.append(cached)
+            else:
+                fresh_numbers.append(cached)
+
+        # Возвращаем свежие в available
+        self._available[key] = fresh_numbers
+
+        if not outdated_numbers:
+            return 0
+
+        # Запускаем возврат в фоне, чтобы не блокировать выдачу
+        asyncio.create_task(self._release_outdated_async(outdated_numbers, key))
+
+        logger.info(f"Found {len(outdated_numbers)} outdated numbers in {key}, releasing to sheets in background")
+        return len(outdated_numbers)
+
+    async def _release_outdated_async(self, numbers: List[CachedNumber], key: str) -> None:
+        """Асинхронно вернуть устаревшие номера в таблицу"""
+        try:
+            await self._insert_numbers_by_date(numbers)
+            logger.info(f"Successfully released {len(numbers)} outdated numbers for {key}")
+        except Exception as e:
+            logger.error(f"Error releasing outdated numbers: {e}")
+            # В случае ошибки возвращаем номера обратно в буфер
+            if key in self._available:
+                for num in reversed(numbers):
+                    self._available[key].appendleft(num)
+            else:
+                self._available[key] = deque(numbers)
 
     async def _flush_used_for_updates(self) -> None:
         """Batch обновление used_for в таблице База"""
@@ -528,6 +645,16 @@ class NumberCache:
 
             number = number_id.strip()
 
+            # Удаляем из pending (feedback получен)
+            pending_to_remove = None
+            for pid, pending in self._pending.items():
+                if pending.number == number:
+                    pending_to_remove = pid
+                    break
+            if pending_to_remove:
+                del self._pending[pending_to_remove]
+                logger.debug(f"Removed {number} from pending (feedback received)")
+
             async with self._issued_cache_lock:
                 if number in self._issued_cache:
                     # Fast path: уже в кэше
@@ -582,6 +709,226 @@ class NumberCache:
             return False
 
     # ==================== ПОДСЧЁТ ====================
+
+    def get_stats(self) -> Dict[str, Dict[str, int]]:
+        """Получить статистику кэша номеров"""
+        stats = {}
+
+        # Подсчёт available по ресурсам
+        for key, numbers in self._available.items():
+            if key not in stats:
+                stats[key] = {"available": 0, "pending": 0, "write_buffer": 0}
+            stats[key]["available"] = len(numbers)
+
+        # Подсчёт pending
+        for pending in self._pending.values():
+            key = self._get_resource_key(pending.resources)
+            if key not in stats:
+                stats[key] = {"available": 0, "pending": 0, "write_buffer": 0}
+            stats[key]["pending"] += 1
+
+        # Подсчёт issued_cache (как write_buffer)
+        for number in self._issued_cache.keys():
+            # Номера в issued_cache относим к общей категории
+            if "numbers" not in stats:
+                stats["numbers"] = {"available": 0, "pending": 0, "write_buffer": 0}
+            stats["numbers"]["write_buffer"] = len(self._issued_cache)
+            break  # Один раз
+
+        return stats
+
+    async def release_outdated_to_sheets(self, resource_key: str = None) -> Dict[str, int]:
+        """
+        Вернуть устаревшие номера (с датой не сегодняшней) из буфера обратно в таблицу.
+        Номера вставляются ПЕРЕД сегодняшними номерами.
+
+        Args:
+            resource_key: Ключ ресурса (например, "beboo_loloo") или None для всех
+
+        Returns:
+            Словарь с количеством освобождённых номеров по ключам
+        """
+        today = date.today()
+        released = {}
+
+        keys_to_process = [resource_key] if resource_key else list(self._available.keys())
+
+        for key in keys_to_process:
+            if key not in self._available:
+                continue
+
+            available = self._available[key]
+            outdated_numbers = []
+            fresh_numbers = deque()
+
+            # Разделяем на устаревшие и свежие
+            while available:
+                cached = available.popleft()
+                row_date = parse_date(cached.date_added)
+                if row_date != today:
+                    outdated_numbers.append(cached)
+                else:
+                    fresh_numbers.append(cached)
+
+            # Возвращаем свежие в available
+            self._available[key] = fresh_numbers
+
+            if not outdated_numbers:
+                released[key] = 0
+                continue
+
+            # Вставляем устаревшие обратно в таблицу на свои места по дате
+            try:
+                await self._insert_numbers_by_date(outdated_numbers)
+                released[key] = len(outdated_numbers)
+                logger.info(f"Released {len(outdated_numbers)} outdated numbers for {key} back to sheets")
+            except Exception as e:
+                logger.error(f"Error releasing outdated numbers for {key}: {e}")
+                # Возвращаем обратно в буфер в случае ошибки
+                for num in outdated_numbers:
+                    self._available[key].appendleft(num)
+                released[key] = 0
+
+        return released
+
+    async def _insert_numbers_by_date(self, numbers: List[CachedNumber]) -> None:
+        """
+        Вставить номера в таблицу базы ПОСЛЕ последнего номера с той же датой.
+        Если номеров с такой датой нет - вставляем в конец таблицы.
+
+        Группирует номера по дате и вставляет каждую группу в правильное место.
+        """
+        if not numbers:
+            return
+
+        async with sheets_rate_limiter:
+            gc = await agcm.authorize()
+        async with sheets_rate_limiter:
+            ss = await gc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
+
+        sheet_name = settings.SHEET_NAMES.get("numbers", "Номера")
+        async with sheets_rate_limiter:
+            ws = await ss.worksheet(sheet_name)
+        async with sheets_rate_limiter:
+            all_values = await ws.get_all_values()
+
+        # Группируем номера по дате
+        numbers_by_date: Dict[str, List[CachedNumber]] = {}
+        for num in numbers:
+            if num.date_added not in numbers_by_date:
+                numbers_by_date[num.date_added] = []
+            numbers_by_date[num.date_added].append(num)
+
+        # Находим позиции последних номеров для каждой даты в таблице
+        # {date_str: last_row_index}
+        last_row_for_date: Dict[str, int] = {}
+        for idx, row in enumerate(all_values[1:], start=2):
+            if not row or len(row) < 2:
+                continue
+            row_date_str = row[0].strip()
+            if row_date_str:
+                last_row_for_date[row_date_str] = idx
+
+        # Вставляем группы в порядке убывания позиции (чтобы не сбивать индексы)
+        # Сначала собираем все вставки
+        insertions: List[tuple] = []  # (row_index, rows_data)
+
+        for date_str, nums in numbers_by_date.items():
+            rows_data = []
+            for num in nums:
+                rows_data.append([
+                    num.date_added,
+                    num.number,
+                    format_used_for(num.used_for),
+                ])
+
+            if date_str in last_row_for_date:
+                # Вставляем после последнего номера с этой датой
+                insert_after = last_row_for_date[date_str]
+                insertions.append((insert_after + 1, rows_data))
+            else:
+                # Нет номеров с такой датой - вставляем в конец
+                # Используем большое число, чтобы при сортировке было в конце
+                insertions.append((999999, rows_data))
+
+        # Сортируем по убыванию позиции (вставляем снизу вверх)
+        insertions.sort(key=lambda x: x[0], reverse=True)
+
+        # Вставляем
+        total_inserted = 0
+        for insert_row, rows_data in insertions:
+            if insert_row == 999999:
+                # Вставляем в конец - нужно пересчитать актуальную позицию
+                async with sheets_rate_limiter:
+                    current_values = await ws.get_all_values()
+                insert_row = len(current_values) + 1
+
+            async with sheets_rate_limiter:
+                await ws.insert_rows(rows_data, row=insert_row)
+            total_inserted += len(rows_data)
+            logger.info(f"Inserted {len(rows_data)} numbers at row {insert_row}")
+
+        logger.info(f"Total inserted: {total_inserted} outdated numbers")
+
+    async def release_to_sheets(self, resource_key: str = None) -> Dict[str, int]:
+        """
+        Вернуть ВСЕ номера из буфера обратно в таблицу (аналогично account_cache).
+
+        Args:
+            resource_key: Ключ ресурса или None для всех
+
+        Returns:
+            Словарь с количеством освобождённых номеров
+        """
+        released = {"available": 0, "pending": 0}
+
+        keys_to_process = [resource_key] if resource_key else list(self._available.keys())
+
+        for key in keys_to_process:
+            if key not in self._available:
+                continue
+
+            available = self._available.get(key, deque())
+            if not available:
+                continue
+
+            numbers_to_release = list(available)
+
+            try:
+                # Вставляем в начало таблицы (после заголовка)
+                await self._insert_numbers_at_position(numbers_to_release, row=2)
+                released["available"] += len(numbers_to_release)
+                self._available[key] = deque()
+                logger.info(f"Released {len(numbers_to_release)} numbers for {key} to sheets")
+            except Exception as e:
+                logger.error(f"Error releasing numbers for {key}: {e}")
+
+        return released
+
+    async def _insert_numbers_at_position(self, numbers: List[CachedNumber], row: int = 2) -> None:
+        """Вставить номера в таблицу на указанную позицию"""
+        if not numbers:
+            return
+
+        async with sheets_rate_limiter:
+            gc = await agcm.authorize()
+        async with sheets_rate_limiter:
+            ss = await gc.open_by_key(settings.SPREADSHEET_ACCOUNTS)
+
+        sheet_name = settings.SHEET_NAMES.get("numbers", "Номера")
+        async with sheets_rate_limiter:
+            ws = await ss.worksheet(sheet_name)
+
+        rows_to_insert = []
+        for num in numbers:
+            rows_to_insert.append([
+                num.date_added,
+                num.number,
+                format_used_for(num.used_for),
+            ])
+
+        async with sheets_rate_limiter:
+            await ws.insert_rows(rows_to_insert, row=row)
 
     async def get_available_count(self, resources: List[str] = None) -> int:
         """Получить количество доступных номеров"""
@@ -752,6 +1099,10 @@ class NumberCache:
 
         ВАЖНО: Использует sync_lock чтобы только одна синхронизация шла в момент времени.
         """
+        # Пропускаем если была ошибка доступа
+        if self._issued_sheet_permission_error:
+            return
+
         # Только одна синхронизация за раз
         if self._sync_lock.locked():
             logger.debug("Sync already in progress, skipping")
@@ -770,6 +1121,8 @@ class NumberCache:
 
             if not records_to_sync:
                 return
+
+            logger.debug(f"Starting sync of {len(records_to_sync)} records")
 
             ws_issued = None
             try:
@@ -910,8 +1263,15 @@ class NumberCache:
 
                 logger.debug(f"Marked {synced_count}/{len(records_to_sync)} records as synced")
 
+            except PermissionError:
+                self._issued_sheet_permission_error = True
+                logger.error(
+                    "PERMISSION DENIED: No access to SPREADSHEET_ISSUED. "
+                    "Please share the spreadsheet with the service account email. "
+                    "Sync disabled until restart."
+                )
             except Exception as e:
-                logger.error(f"Error syncing issued cache to sheets: {e}")
+                logger.exception(f"Error syncing issued cache to sheets: {e}")
                 # НЕ помечаем как синхронизированные - retry при следующем цикле
 
     # ==================== ПЕРСИСТЕНТНОСТЬ ====================
@@ -1041,6 +1401,7 @@ class NumberCache:
         if self._issued_sync_task is None or self._issued_sync_task.done():
             self._issued_sync_task = asyncio.create_task(self._issued_sync_loop())
             logger.info("Issued cache sync task started")
+
 
     async def shutdown(self) -> None:
         """Корректное завершение"""

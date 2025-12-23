@@ -258,8 +258,7 @@ class AccountCache:
             return [account.login, account.password, account.email_password, account.confirmation_link]
         elif resource == Resource.OK:
             return [account.login, account.password]
-        elif resource == Resource.GMAIL:
-            return [account.login, account.password, account.backup_email or ""]
+        # Gmail убран - теперь обрабатывается в EmailCache (email_service.py)
         return []
 
     # ==================== ФОНОВЫЕ ЗАДАЧИ ====================
@@ -381,7 +380,7 @@ class AccountCache:
 
     def _dict_to_account(self, resource: Resource, data: Dict[str, Any]):
         """Десериализация dict в аккаунт"""
-        from bot.models.account import VKAccount, MambaAccount, OKAccount, GmailAccount
+        from bot.models.account import VKAccount, MambaAccount, OKAccount
 
         if resource == Resource.VK:
             return VKAccount(login=data["login"], password=data["password"], row_index=data["row_index"])
@@ -393,11 +392,7 @@ class AccountCache:
             )
         elif resource == Resource.OK:
             return OKAccount(login=data["login"], password=data["password"], row_index=data["row_index"])
-        elif resource == Resource.GMAIL:
-            return GmailAccount(
-                login=data["login"], password=data["password"], row_index=data["row_index"],
-                backup_email=data.get("backup_email"),
-            )
+        # Gmail убран - теперь обрабатывается в EmailCache (email_service.py)
         return None
 
     def save_state(self) -> None:
@@ -540,12 +535,15 @@ class AccountCache:
         state_loaded = self.load_state()
 
         # Проверяем, нужно ли дозагружать из Sheets
+        # Gmail убран - теперь обрабатывается в EmailCache (email_service.py)
         need_load = []
         for resource in Resource:
+            # Пропускаем Gmail - он в EmailCache
+            if resource == Resource.GMAIL:
+                continue
+
             for gender in Gender:
                 # Пропускаем неподходящие комбинации
-                if resource == Resource.GMAIL and gender in (Gender.MALE, Gender.FEMALE, Gender.NONE):
-                    continue
                 if resource in (Resource.VK, Resource.OK) and gender != Gender.NONE:
                     continue
                 if resource == Resource.MAMBA and gender in (Gender.ANY, Gender.GMAIL_DOMAIN, Gender.NONE):
@@ -635,6 +633,61 @@ class AccountCache:
         logger.info(f"Cache cleared: key={key}, type={clear_type}, cleared={cleared}")
 
         return cleared
+
+    async def release_to_sheets(self, key: str = None) -> Dict[str, int]:
+        """
+        Освободить аккаунты из буфера — вернуть в таблицу базы.
+
+        Args:
+            key: Ключ ресурса (например "vk_none") или None для всех
+
+        Returns:
+            Словарь с количеством возвращённых элементов
+        """
+        released = {"available": 0}
+
+        keys_to_process = [key] if key else list(self._available.keys())
+
+        for cache_key in keys_to_process:
+            available = self._available.get(cache_key, deque())
+            if not available:
+                continue
+
+            # Забираем все аккаунты из буфера
+            accounts_to_release = list(available)
+            if not accounts_to_release:
+                continue
+
+            # Определяем resource и gender из ключа
+            try:
+                resource_str, gender_str = cache_key.split("_", 1)
+                resource = Resource(resource_str)
+                gender = Gender(gender_str)
+            except (ValueError, AttributeError):
+                logger.error(f"Invalid cache key: {cache_key}")
+                continue
+
+            try:
+                # Возвращаем в таблицу базы
+                rows_data = []
+                for acc in accounts_to_release:
+                    row = self._get_account_data_list(resource, acc)
+                    if row:
+                        rows_data.append(row)
+
+                if rows_data:
+                    await sheets_service.append_accounts_to_base(resource, gender, rows_data)
+                    released["available"] += len(rows_data)
+                    # Очищаем буфер после успешной записи
+                    self._available[cache_key] = deque()
+                    logger.info(f"Released {len(rows_data)} accounts for {cache_key} back to base")
+
+            except Exception as e:
+                logger.error(f"Error releasing accounts for {cache_key}: {e}")
+
+        # Сохраняем состояние после освобождения
+        self.save_state()
+        return released
 
 
 # Глобальный кэш

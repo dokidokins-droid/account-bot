@@ -42,7 +42,7 @@ class PendingReservation:
     Prevents race conditions when multiple users select proxies simultaneously.
     """
     row_index: int
-    resource: str
+    resources: List[str]  # List of resources (can be multiple)
     user_id: int
     expires_at: float  # monotonic time
 
@@ -52,11 +52,11 @@ class PendingReservation:
         return time.monotonic() > self.expires_at
 
     @classmethod
-    def create(cls, row_index: int, resource: str, user_id: int) -> "PendingReservation":
+    def create(cls, row_index: int, resources: List[str], user_id: int) -> "PendingReservation":
         """Create new reservation with TTL"""
         return cls(
             row_index=row_index,
-            resource=resource,
+            resources=[r.lower() for r in resources],
             user_id=user_id,
             expires_at=time.monotonic() + RESERVATION_TTL_SECONDS
         )
@@ -365,24 +365,30 @@ class ProxyService:
         logger.debug(f"Fetched and cached {len(proxies)} proxies")
         return proxies
 
-    async def get_available_proxies(self, resource: str, force_refresh: bool = False) -> List[Proxy]:
+    async def get_available_proxies(self, resources: List[str], force_refresh: bool = False) -> List[Proxy]:
         """
-        Get available proxies for resource (not used and not expired).
+        Get available proxies for resources (not used and not expired).
 
+        A proxy is available if it's not used for ANY of the specified resources.
         Sorted by days_left descending (more days = higher priority).
+
+        Args:
+            resources: List of resource names to check
+            force_refresh: Force cache refresh
         """
         all_proxies = await self.get_all_proxies(force_refresh=force_refresh)
+        resources_lower = [r.lower() for r in resources]
 
         available = []
         for proxy in all_proxies:
             # Skip expired
             if proxy.is_expired:
                 continue
-            # Skip already used for this resource
-            if proxy.is_used_for(resource):
+            # Skip if already used for ANY of the resources
+            if any(proxy.is_used_for(r) for r in resources_lower):
                 continue
-            # Skip pending reservations for other users/resources
-            if await self._is_reserved(proxy.row_index, resource):
+            # Skip pending reservations for other users
+            if await self._is_reserved(proxy.row_index, resources_lower):
                 continue
 
             available.append(proxy)
@@ -392,8 +398,8 @@ class ProxyService:
 
         return available
 
-    async def _is_reserved(self, row_index: int, resource: str) -> bool:
-        """Check if proxy is reserved by someone else"""
+    async def _is_reserved(self, row_index: int, resources: List[str]) -> bool:
+        """Check if proxy is reserved by someone else for any of the resources"""
         async with self._pending_lock:
             reservation = self._pending.get(row_index)
             if reservation is None:
@@ -404,12 +410,15 @@ class ProxyService:
                 del self._pending[row_index]
                 return False
 
-            # Reserved if for different resource
-            return reservation.resource.lower() != resource.lower()
+            # Reserved if for different resources (no overlap)
+            resources_lower = set(r.lower() for r in resources)
+            reserved_resources = set(reservation.resources)
+            # If there's no overlap, it's reserved for different resources
+            return len(resources_lower & reserved_resources) == 0
 
-    async def get_countries_with_counts(self, resource: str) -> Dict[str, int]:
-        """Get dictionary of countries with count of available proxies"""
-        proxies = await self.get_available_proxies(resource)
+    async def get_countries_with_counts(self, resources: List[str]) -> Dict[str, int]:
+        """Get dictionary of countries with count of available proxies for resources"""
+        proxies = await self.get_available_proxies(resources)
 
         counts = defaultdict(int)
         for proxy in proxies:
@@ -419,19 +428,19 @@ class ProxyService:
 
     async def get_proxies_by_country(
         self,
-        resource: str,
+        resources: List[str],
         country: str,
         limit: Optional[int] = None
     ) -> List[Proxy]:
         """
-        Get proxies for resource by country.
+        Get proxies for resources by country.
 
         Args:
-            resource: Resource name
+            resources: List of resource names
             country: Country code
             limit: Optional limit on number of proxies returned
         """
-        proxies = await self.get_available_proxies(resource)
+        proxies = await self.get_available_proxies(resources)
         filtered = [p for p in proxies if p.country.upper() == country.upper()]
 
         if limit is not None:
@@ -441,7 +450,7 @@ class ProxyService:
 
     async def get_proxies_for_user(
         self,
-        resource: str,
+        resources: List[str],
         country: str,
         user_id: int
     ) -> Tuple[List[Proxy], Set[int]]:
@@ -452,7 +461,7 @@ class ProxyService:
         and set of row indices that current user has reserved.
 
         Args:
-            resource: Resource name
+            resources: List of resource names
             country: Country code
             user_id: Current user ID
 
@@ -460,6 +469,7 @@ class ProxyService:
             Tuple of (available_proxies, user_reserved_rows)
         """
         all_proxies = await self.get_all_proxies()
+        resources_lower = [r.lower() for r in resources]
 
         available = []
         user_reserved = set()
@@ -479,8 +489,8 @@ class ProxyService:
                 if proxy.is_expired:
                     continue
 
-                # Skip already used for this resource
-                if proxy.is_used_for(resource):
+                # Skip if already used for ANY of the resources
+                if any(proxy.is_used_for(r) for r in resources_lower):
                     continue
 
                 # Check pending reservations
@@ -516,7 +526,7 @@ class ProxyService:
     async def reserve_proxies(
         self,
         row_indices: List[int],
-        resource: str,
+        resources: List[str],
         user_id: int
     ) -> List[int]:
         """
@@ -525,6 +535,7 @@ class ProxyService:
         Returns list of successfully reserved row indices.
         """
         reserved = []
+        resources_lower = [r.lower() for r in resources]
 
         async with self._pending_lock:
             for row_idx in row_indices:
@@ -534,9 +545,9 @@ class ProxyService:
                     if existing.is_expired:
                         # Expired, can take over
                         del self._pending[row_idx]
-                    elif existing.user_id == user_id and existing.resource.lower() == resource.lower():
-                        # Same user, same resource - extend TTL
-                        self._pending[row_idx] = PendingReservation.create(row_idx, resource, user_id)
+                    elif existing.user_id == user_id and set(existing.resources) == set(resources_lower):
+                        # Same user, same resources - extend TTL
+                        self._pending[row_idx] = PendingReservation.create(row_idx, resources, user_id)
                         reserved.append(row_idx)
                         continue
                     else:
@@ -544,10 +555,10 @@ class ProxyService:
                         continue
 
                 # Create new reservation
-                self._pending[row_idx] = PendingReservation.create(row_idx, resource, user_id)
+                self._pending[row_idx] = PendingReservation.create(row_idx, resources, user_id)
                 reserved.append(row_idx)
 
-        logger.info(f"User {user_id} reserved {len(reserved)}/{len(row_indices)} proxies for {resource}")
+        logger.info(f"User {user_id} reserved {len(reserved)}/{len(row_indices)} proxies for {resources}")
         return reserved
 
     async def cancel_reservation(self, row_index: int, user_id: int) -> bool:
@@ -593,7 +604,7 @@ class ProxyService:
     async def take_proxies_batch(
         self,
         row_indices: List[int],
-        resource: str,
+        resources: List[str],
         user_id: int
     ) -> Tuple[List[Proxy], List[int]]:
         """
@@ -605,7 +616,7 @@ class ProxyService:
 
         Args:
             row_indices: List of row indices to take
-            resource: Resource name
+            resources: List of resource names to add to used_for
             user_id: User ID taking the proxies
 
         Returns:
@@ -614,6 +625,7 @@ class ProxyService:
         if not row_indices:
             return [], []
 
+        resources_lower = [r.lower() for r in resources]
         ws = await self._get_worksheet()
 
         # Step 1: Get current data for all rows (1 API call)
@@ -637,10 +649,11 @@ class ProxyService:
                 failed.append(row_idx)
                 continue
 
-            # Check if already used for this resource
+            # Check if already used for ANY of the resources
             used_for = Proxy.parse_used_for(row[4] if len(row) > 4 else "")
-            if resource.lower() in [r.lower() for r in used_for]:
-                logger.warning(f"Proxy at row {row_idx} already used for {resource}")
+            used_for_lower = [r.lower() for r in used_for]
+            if any(r in used_for_lower for r in resources_lower):
+                logger.warning(f"Proxy at row {row_idx} already used for one of {resources}")
                 failed.append(row_idx)
                 continue
 
@@ -650,13 +663,15 @@ class ProxyService:
                 if reservation is not None:
                     if reservation.is_expired:
                         del self._pending[row_idx]
-                    elif reservation.user_id != user_id or reservation.resource.lower() != resource.lower():
-                        logger.warning(f"Row {row_idx} reserved by another user/resource")
+                    elif reservation.user_id != user_id:
+                        logger.warning(f"Row {row_idx} reserved by another user")
                         failed.append(row_idx)
                         continue
 
-            # Prepare update
-            used_for.append(resource.lower())
+            # Prepare update - add ALL resources
+            for r in resources_lower:
+                if r not in used_for_lower:
+                    used_for.append(r)
             new_used_for = ",".join(used_for)
 
             # Create proxy object
@@ -689,7 +704,7 @@ class ProxyService:
             async with sheets_rate_limiter:
                 await ws.batch_update(batch_data, value_input_option="USER_ENTERED")
 
-            logger.info(f"User {user_id} took {len(taken)} proxies for {resource} (batch update)")
+            logger.info(f"User {user_id} took {len(taken)} proxies for {resources} (batch update)")
 
             # Clear reservations for taken proxies
             async with self._pending_lock:
@@ -702,13 +717,13 @@ class ProxyService:
 
         return taken, failed
 
-    async def try_take_proxy(self, row_index: int, resource: str, user_id: int) -> Optional[Proxy]:
+    async def try_take_proxy(self, row_index: int, resources: List[str], user_id: int) -> Optional[Proxy]:
         """
         Take a single proxy (convenience method).
 
         Uses batch update internally for consistency.
         """
-        taken, failed = await self.take_proxies_batch([row_index], resource, user_id)
+        taken, failed = await self.take_proxies_batch([row_index], resources, user_id)
         return taken[0] if taken else None
 
     async def get_proxy_by_row(self, row_index: int) -> Optional[Proxy]:
