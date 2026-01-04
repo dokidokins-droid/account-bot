@@ -35,7 +35,7 @@ class Resource(str, Enum):
 class Gender(str, Enum):
     MALE = "male"
     FEMALE = "female"
-    ANY = "any"  # Для Gmail - "Гугл Обыч"
+    ANY = "any"  # Для Gmail - "Гугл Любые"
     GMAIL_DOMAIN = "gmail_domain"  # Для Gmail - "Гугл Гмейл" (только gmail.com)
     NONE = "none"  # Для ресурсов без выбора пола (VK, OK)
 
@@ -44,7 +44,7 @@ class Gender(str, Enum):
         names = {
             "male": "Мужской",
             "female": "Женский",
-            "any": "Обычные",
+            "any": "Любые",
             "gmail_domain": "gmail.com",
             "none": "—",
         }
@@ -68,6 +68,7 @@ class Gender(str, Enum):
 
 class AccountStatus(str, Enum):
     BLOCK = "block"
+    AUTH = "auth"  # Просит авторизацию - недоступен для выдачи
     GOOD = "good"
     DEFECT = "defect"
 
@@ -76,6 +77,7 @@ class AccountStatus(str, Enum):
         """Название для кнопок (с эмодзи)"""
         names = {
             "block": "🚫 Блок",
+            "auth": "🔐 Авторизация",
             "good": "✅ Хороший",
             "defect": "⚠️ Дефектный",
         }
@@ -86,6 +88,7 @@ class AccountStatus(str, Enum):
         """Название для записи в таблицу (без эмодзи, с большой буквы)"""
         names = {
             "block": "Блок",
+            "auth": "Авторизация",
             "good": "Хороший",
             "defect": "Дефектный",
         }
@@ -97,12 +100,19 @@ class AccountStatus(str, Enum):
         colors = {
             # Блок - светло-красный
             "block": {"red": 0.96, "green": 0.80, "blue": 0.80},
+            # Авторизация - светло-оранжевый
+            "auth": {"red": 1.0, "green": 0.87, "blue": 0.68},
             # Хороший - светло-зелёный
             "good": {"red": 0.85, "green": 0.94, "blue": 0.85},
             # Дефектный - светло-жёлтый
             "defect": {"red": 1.0, "green": 0.95, "blue": 0.80},
         }
         return colors[self.value]
+
+    @property
+    def blocks_reuse(self) -> bool:
+        """Статус блокирует повторное использование (для эконом режима)"""
+        return self.value in ("block", "auth")
 
 
 class ProxyResource(str, Enum):
@@ -281,7 +291,7 @@ class NumberStatus(str, Enum):
 
 
 class EmailResource(str, Enum):
-    """Почтовые ресурсы"""
+    """Почтовые домены (Gmail/Рамблер)"""
     GMAIL = "gmail"
     RAMBLER = "rambler"
 
@@ -304,6 +314,138 @@ class EmailResource(str, Enum):
     @property
     def button_text(self) -> str:
         return f"{self.emoji} {self.display_name}"
+
+    @property
+    def sheet_name(self) -> str:
+        """Название листа в таблице базы"""
+        from bot.config import settings
+        names = {
+            "gmail": settings.SHEET_NAMES.get("gmail_any", "Гугл Любые"),
+            "rambler": settings.SHEET_NAMES.get("rambler_none", "Рамблер"),
+        }
+        return names[self.value]
+
+
+class EmailTargetResource(str, Enum):
+    """Ресурсы, на которые выдаются почты (аналог ProxyResource)"""
+    OK = "ok"
+    MAMBA = "mamba"
+    BEBOO = "beboo"
+    LOLOO = "loloo"
+    TABOR = "tabor"
+    TOPFACE = "topface"
+    LOVERU = "loveru"
+    FOTOSTRANA = "fotostrana"
+    LOVEPLANET = "loveplanet"
+    BADOO = "badoo"
+    PURE = "pure"
+    OTHER = "other"
+
+    @property
+    def display_name(self) -> str:
+        names = {
+            "ok": "Одноклассники",
+            "mamba": "Мамба",
+            "beboo": "Beboo",
+            "loloo": "Loloo",
+            "tabor": "Табор",
+            "topface": "Topface",
+            "loveru": "Love.ru",
+            "fotostrana": "Фотострана",
+            "loveplanet": "LovePlanet",
+            "badoo": "Badoo",
+            "pure": "Pure",
+            "other": "Другие",
+        }
+        return names[self.value]
+
+    @property
+    def emoji(self) -> str:
+        emojis = {
+            "ok": "🟠",
+            "mamba": "🔴",
+            "beboo": "🟧",
+            "loloo": "🟦",
+            "tabor": "🟥",
+            "topface": "🎭",
+            "loveru": "🔺",
+            "fotostrana": "📷",
+            "loveplanet": "💙",
+            "badoo": "🟣",
+            "pure": "⬜",
+            "other": "🔘",
+        }
+        return emojis[self.value]
+
+    @property
+    def button_text(self) -> str:
+        return f"{self.emoji} {self.display_name}"
+
+
+class EmailType(str, Enum):
+    """Тип почты Gmail (Любые / только gmail.com)"""
+    ANY = "any"  # Любые домены
+    GMAIL_DOMAIN = "gmail_domain"  # Только @gmail.com
+    NONE = "none"  # Для Rambler (без типа)
+
+    @property
+    def display_name(self) -> str:
+        names = {
+            "any": "Любые",
+            "gmail_domain": "gmail.com",
+            "none": "—",
+        }
+        return names[self.value]
+
+    @property
+    def emoji(self) -> str:
+        emojis = {
+            "any": "📧",
+            "gmail_domain": "📬",
+            "none": "",
+        }
+        return emojis[self.value]
+
+    @property
+    def button_text(self) -> str:
+        if self == EmailType.NONE:
+            return self.display_name
+        return f"{self.emoji} {self.display_name}"
+
+
+class EmailMode(str, Enum):
+    """Режим выдачи почт: Новая (из базы) или Эконом (повторное использование)"""
+    NEW = "new"
+    ECONOMY = "economy"
+
+    @property
+    def display_name(self) -> str:
+        names = {
+            "new": "Новая",
+            "economy": "Эконом",
+        }
+        return names[self.value]
+
+    @property
+    def emoji(self) -> str:
+        emojis = {
+            "new": "✨",
+            "economy": "♻️",
+        }
+        return emojis[self.value]
+
+    @property
+    def button_text(self) -> str:
+        return f"{self.emoji} {self.display_name}"
+
+    @property
+    def description(self) -> str:
+        """Описание режима для пользователя"""
+        descriptions = {
+            "new": "Свежая почта из базы",
+            "economy": "Ранее использованная на других ресурсах",
+        }
+        return descriptions[self.value]
 
 
 # Названия стран (полный список ISO 3166-1 alpha-2)

@@ -129,7 +129,7 @@ def get_gender_keyboard(resource: Resource) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     if resource == Resource.GMAIL:
-        # Gmail: Обычные / gmail.com
+        # Gmail: Любые / gmail.com
         builder.button(
             text=Gender.ANY.button_text,
             callback_data=GenderCallback(gender=Gender.ANY.value),
@@ -367,7 +367,7 @@ def get_stat_email_resource_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_stat_email_type_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура выбора типа Gmail для статистики (Обычные/gmail.com)"""
+    """Клавиатура выбора типа Gmail для статистики (Любые/gmail.com)"""
     builder = InlineKeyboardBuilder()
     builder.button(
         text=Gender.ANY.button_text,
@@ -585,12 +585,8 @@ def get_buffer_clear_emails_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура выбора ресурса почт для очистки"""
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📧 Gmail Обычные",
-        callback_data=BufferClearResourceCallback(resource="gmail_any"),
-    )
-    builder.button(
-        text="📧 Gmail gmail.com",
-        callback_data=BufferClearResourceCallback(resource="gmail_domain"),
+        text="📧 Gmail",
+        callback_data=BufferClearResourceCallback(resource="gmail"),
     )
     builder.button(
         text="📨 Рамблер",
@@ -604,7 +600,7 @@ def get_buffer_clear_emails_keyboard() -> InlineKeyboardMarkup:
         text="« Назад",
         callback_data=BufferClearBackCallback(to="category"),
     )
-    builder.adjust(2, 2, 1)
+    builder.adjust(2, 1, 1)
     return builder.as_markup()
 
 
@@ -733,12 +729,8 @@ def get_buffer_release_emails_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура выбора ресурса почт для освобождения"""
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📧 Gmail (Обычные)",
-        callback_data=BufferReleaseResourceCallback(resource="gmail_any"),
-    )
-    builder.button(
-        text="📧 Gmail (@gmail)",
-        callback_data=BufferReleaseResourceCallback(resource="gmail_domain"),
+        text="📧 Gmail",
+        callback_data=BufferReleaseResourceCallback(resource="gmail"),
     )
     builder.button(
         text="📨 Rambler",
@@ -752,7 +744,7 @@ def get_buffer_release_emails_keyboard() -> InlineKeyboardMarkup:
         text="◀️ Назад",
         callback_data=BufferReleaseBackCallback(to="category"),
     )
-    builder.adjust(2, 1, 1, 1)
+    builder.adjust(2, 1, 1)
     return builder.as_markup()
 
 

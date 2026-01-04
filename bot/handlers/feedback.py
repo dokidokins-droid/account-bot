@@ -7,6 +7,7 @@ from bot.keyboards.callbacks import AccountFeedbackCallback, ReplaceAccountCallb
 from bot.keyboards.inline import get_replace_keyboard, get_feedback_keyboard
 from bot.services.account_service import account_service
 from bot.services.whitelist_service import whitelist_service
+from bot.services.pending_messages import pending_messages
 from bot.models.enums import Resource, Gender, AccountStatus
 from bot.utils.formatters import format_account_message, make_compact_after_feedback
 
@@ -35,6 +36,9 @@ async def process_feedback(
     region = callback_data.region
 
     try:
+        # Снимаем с отслеживания для автоподтверждения (ручной feedback получен)
+        pending_messages.unregister(account_id)
+
         # Подтверждаем аккаунт мгновенно (добавляет в буфер записи)
         success = account_service.confirm_feedback(account_id, status)
 
@@ -44,8 +48,8 @@ async def process_feedback(
         # Компактный формат сообщения (без строки копирования)
         new_text = make_compact_after_feedback(callback.message.html_text, status_display)
 
-        # Для block и defect показываем кнопку замены
-        if status in ("block", "defect"):
+        # Для block, auth и defect показываем кнопку замены
+        if status in ("block", "auth", "defect"):
             await callback.message.edit_text(
                 new_text,
                 parse_mode="HTML",
@@ -108,9 +112,10 @@ async def process_replace(
         account_id = item["account_id"]
 
         message_text = format_account_message(resource, account, region)
+        full_text = f"🔄 <b>Замена аккаунта:</b>\n\n{message_text}"
 
-        await callback.message.answer(
-            f"🔄 <b>Замена аккаунта:</b>\n\n{message_text}",
+        sent_msg = await callback.message.answer(
+            full_text,
             reply_markup=get_feedback_keyboard(
                 account_id=account_id,
                 resource=resource.value,
@@ -118,6 +123,15 @@ async def process_replace(
                 region=region,
             ),
             parse_mode="HTML",
+        )
+
+        # Регистрируем сообщение для автоподтверждения через 10 минут
+        pending_messages.register(
+            entity_type="account",
+            entity_id=account_id,
+            chat_id=sent_msg.chat.id,
+            message_id=sent_msg.message_id,
+            original_text=full_text,
         )
 
         # Убираем кнопку замены с предыдущего сообщения

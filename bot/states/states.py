@@ -27,7 +27,7 @@ class StatisticStates(StatesGroup):
 
     # Почты (Gmail, Rambler)
     email_selecting_resource = State()  # Выбор почтового ресурса
-    email_selecting_type = State()  # Выбор типа Gmail (Обычные/gmail.com)
+    email_selecting_type = State()  # Выбор типа Gmail (Любые/gmail.com)
     email_selecting_region = State()  # Выбор региона для почт
     email_searching_region = State()  # Ручной ввод региона для почт
     email_selecting_period = State()  # Выбор периода для почт
@@ -80,9 +80,18 @@ class NumberStates(StatesGroup):
 
 
 class EmailFlowStates(StatesGroup):
-    """Состояния процесса выдачи почт"""
-    selecting_email_resource = State()  # Выбор почтового ресурса (Gmail/Рамблер)
-    selecting_email_type = State()  # Выбор типа (только для Gmail: Обычные/gmail.com)
+    """Состояния процесса выдачи почт (новый flow с умным распределением)"""
+    selecting_email_resource = State()  # Выбор почтового домена (Gmail/Рамблер)
+    selecting_email_type = State()  # Выбор типа Gmail (Любые / только gmail.com)
     selecting_region = State()  # Выбор региона
     searching_region = State()  # Поиск региона (ввод текста)
+    selecting_mode = State()  # Выбор режима (Новая/Эконом)
+    selecting_target_resources = State()  # Мультиселект целевых ресурсов
     selecting_quantity = State()  # Выбор количества (1-5)
+
+
+class EmailRentalStates(StatesGroup):
+    """Состояния для аренды временных почт через quix.email"""
+    entering_site = State()      # Ввод домена сайта (mamba.ru, beboo.ru и т.д.)
+    selecting_domain = State()   # Выбор домена почты (gmail.com, mail.ru и т.д.)
+    waiting_email = State()      # Ожидание получения письма

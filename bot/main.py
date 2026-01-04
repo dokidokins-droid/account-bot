@@ -8,13 +8,14 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
 from bot.config import settings
-from bot.handlers import start, admin, account_flow, feedback, statistic, proxy, numbers, email_flow
+from bot.handlers import start, admin, account_flow, feedback, statistic, proxy, numbers, email_flow, email_rental_flow
 from bot.middlewares.auth import WhitelistMiddleware
 from bot.services.account_service import account_cache
 from bot.services.proxy_service import init_proxy_service, get_proxy_service
 from bot.services.sheets_service import agcm
 from bot.services.number_service import number_service, number_cache
 from bot.services.email_service import email_service
+from bot.services.pending_messages import pending_messages
 
 # Настройка логирования
 logging.basicConfig(
@@ -33,6 +34,11 @@ async def on_startup(bot: Bot):
     ]
     await bot.set_my_commands(commands)
     logger.info("Bot commands set")
+
+    # Инициализируем менеджер pending сообщений для автоподтверждения
+    pending_messages.set_bot(bot)
+    await pending_messages.start_check_task()
+    logger.info("Pending messages manager started")
 
     # Инициализируем сервис прокси и запускаем очистку резерваций
     proxy_service = init_proxy_service(agcm)
@@ -63,6 +69,9 @@ async def on_startup(bot: Bot):
 
 async def on_shutdown(bot: Bot):
     """Действия при остановке бота"""
+    # Останавливаем менеджер pending сообщений
+    await pending_messages.stop_check_task()
+
     # Останавливаем фоновые задачи прокси
     try:
         await get_proxy_service().stop_cleanup_task()
@@ -95,6 +104,7 @@ def create_dispatcher() -> Dispatcher:
     dp.include_router(proxy.router)
     dp.include_router(numbers.router)
     dp.include_router(email_flow.router)
+    dp.include_router(email_rental_flow.router)
 
     return dp
 
@@ -113,16 +123,11 @@ async def main():
 
     logger.info("Starting bot in polling mode...")
 
-    # Удаляем webhook если он был установлен ранее
-    try:
-        webhook_info = await bot.get_webhook_info()
-        if webhook_info.url:
-            logger.warning(f"Active webhook detected: {webhook_info.url}")
-            logger.info("Deleting webhook...")
-            await bot.delete_webhook(drop_pending_updates=True)
-            logger.info("Webhook deleted successfully")
-    except Exception as e:
-        logger.error(f"Error checking/deleting webhook: {e}")
+    # Всегда удаляем webhook перед polling (безусловно)
+    logger.info("Deleting webhook (if any)...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await asyncio.sleep(0.5)  # Небольшая пауза для применения
+    logger.info("Webhook deleted, starting polling...")
 
     await dp.start_polling(bot)
 

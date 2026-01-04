@@ -322,8 +322,7 @@ RESOURCE_NAMES = {
     "mamba_male": "🔴 Мамба Мужские",
     "mamba_female": "🔴 Мамба Женские",
     "ok": "🟠 Одноклассники",
-    "gmail_any": "📧 Gmail Обычные",
-    "gmail_domain": "📧 Gmail gmail.com",
+    "gmail": "📧 Gmail",
     "rambler": "📨 Рамблер",
     "all_accounts": "📦 Все аккаунты",
     "all_emails": "📧 Все почты",
@@ -345,11 +344,10 @@ ACCOUNT_KEYS = {
     "ok": "ok_none",
 }
 
-# Ключи для почт
-EMAIL_KEYS = {
-    "gmail_any": "gmail_any",
-    "gmail_domain": "gmail_gmail_domain",
-    "rambler": "rambler_none",
+# Ключи буферов для почт (gmail имеет два буфера)
+EMAIL_BUFFER_KEYS = {
+    "gmail": ["gmail_any", "gmail_gmail_domain"],  # Gmail: оба типа
+    "rambler": ["rambler"],  # Rambler: один буфер
 }
 
 
@@ -542,7 +540,7 @@ async def buffer_clear_confirm(
     if resource == "all":
         # Очистить все аккаунты и почты
         acc_cleared = account_cache.clear_cache(key=None, clear_type=clear_type)
-        email_cleared = email_cache.clear_cache(key=None, clear_type=clear_type)
+        email_cleared = email_cache.clear_cache(buffer_key=None, clear_type=clear_type)
         for k in total_cleared:
             total_cleared[k] = acc_cleared[k] + email_cleared[k]
 
@@ -550,15 +548,19 @@ async def buffer_clear_confirm(
         total_cleared = account_cache.clear_cache(key=None, clear_type=clear_type)
 
     elif resource == "all_emails":
-        total_cleared = email_cache.clear_cache(key=None, clear_type=clear_type)
+        total_cleared = email_cache.clear_cache(buffer_key=None, clear_type=clear_type)
 
     elif resource in ACCOUNT_KEYS:
         key = ACCOUNT_KEYS[resource]
         total_cleared = account_cache.clear_cache(key=key, clear_type=clear_type)
 
-    elif resource in EMAIL_KEYS:
-        key = EMAIL_KEYS[resource]
-        total_cleared = email_cache.clear_cache(key=key, clear_type=clear_type)
+    elif resource in EMAIL_BUFFER_KEYS:
+        # Gmail имеет два буфера, очищаем оба
+        buffer_keys = EMAIL_BUFFER_KEYS[resource]
+        for buffer_key in buffer_keys:
+            result = email_cache.clear_cache(buffer_key=buffer_key, clear_type=clear_type)
+            for k in total_cleared:
+                total_cleared[k] += result.get(k, 0)
 
     await state.clear()
 
@@ -635,10 +637,10 @@ RELEASE_ACCOUNT_KEYS = {
     "ok": "ok_none",
 }
 
-RELEASE_EMAIL_KEYS = {
-    "gmail_any": "gmail_any",
-    "gmail_domain": "gmail_gmail_domain",
-    "rambler": "rambler_none",
+# Ключи буферов для освобождения почт
+RELEASE_EMAIL_BUFFER_KEYS = {
+    "gmail": ["gmail_any", "gmail_gmail_domain"],  # Gmail: оба типа
+    "rambler": ["rambler"],  # Rambler: один буфер
 }
 
 RELEASE_RESOURCE_NAMES = {
@@ -646,8 +648,7 @@ RELEASE_RESOURCE_NAMES = {
     "mamba_male": "🔴 Mamba (М)",
     "mamba_female": "🔴 Mamba (Ж)",
     "ok": "🟠 OK",
-    "gmail_any": "📧 Gmail (Обычные)",
-    "gmail_domain": "📧 Gmail (@gmail)",
+    "gmail": "📧 Gmail",
     "rambler": "📨 Rambler",
     "all_accounts": "📦 Все аккаунты",
     "all_emails": "📧 Все почты",
@@ -741,8 +742,8 @@ async def buffer_release_resource(
             stats = account_cache.get_stats().get(key, {})
             count += stats.get("available", 0)
     elif resource == "all_emails":
-        for key in RELEASE_EMAIL_KEYS.values():
-            stats = email_cache.get_stats().get(key, {})
+        # Суммируем по всем ключам почт
+        for key, stats in email_cache.get_stats().items():
             count += stats.get("available", 0)
     elif resource == "all_numbers":
         resource_name = "📱 Все номера"
@@ -763,10 +764,12 @@ async def buffer_release_resource(
         key = RELEASE_ACCOUNT_KEYS[resource]
         stats = account_cache.get_stats().get(key, {})
         count = stats.get("available", 0)
-    elif resource in RELEASE_EMAIL_KEYS:
-        key = RELEASE_EMAIL_KEYS[resource]
-        stats = email_cache.get_stats().get(key, {})
-        count = stats.get("available", 0)
+    elif resource in RELEASE_EMAIL_BUFFER_KEYS:
+        # Gmail имеет два буфера, суммируем оба
+        buffer_keys = RELEASE_EMAIL_BUFFER_KEYS[resource]
+        for buffer_key in buffer_keys:
+            stats = email_cache.get_stats().get(buffer_key, {})
+            count += stats.get("available", 0)
 
     await callback.message.edit_text(
         f"🔄 <b>Освобождение буфера</b>\n\n"
@@ -812,9 +815,9 @@ async def buffer_release_confirm(
                 result = await account_cache.release_to_sheets(key)
                 total += result.get("available", 0)
         elif resource == "all_emails":
-            for key in RELEASE_EMAIL_KEYS.values():
-                result = await email_cache.release_to_sheets(key)
-                total += result.get("available", 0)
+            # Освобождаем все почты (buffer_key=None)
+            result = await email_cache.release_to_sheets(buffer_key=None)
+            total = result.get("available", 0)
         elif resource == "all_numbers":
             resource_name = "📱 Все номера"
             result = await number_cache.release_to_sheets()
@@ -828,10 +831,12 @@ async def buffer_release_confirm(
             key = RELEASE_ACCOUNT_KEYS[resource]
             result = await account_cache.release_to_sheets(key)
             total = result.get("available", 0)
-        elif resource in RELEASE_EMAIL_KEYS:
-            key = RELEASE_EMAIL_KEYS[resource]
-            result = await email_cache.release_to_sheets(key)
-            total = result.get("available", 0)
+        elif resource in RELEASE_EMAIL_BUFFER_KEYS:
+            # Gmail имеет два буфера, освобождаем оба
+            buffer_keys = RELEASE_EMAIL_BUFFER_KEYS[resource]
+            for buffer_key in buffer_keys:
+                result = await email_cache.release_to_sheets(buffer_key=buffer_key)
+                total += result.get("available", 0)
 
         await state.clear()
 

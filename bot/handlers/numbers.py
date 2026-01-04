@@ -30,6 +30,7 @@ from bot.models.enums import NumberResource
 from bot.services.number_service import number_service
 from bot.services.region_service import region_service
 from bot.services.whitelist_service import whitelist_service
+from bot.services.pending_messages import pending_messages
 from bot.utils.formatters import format_number_message, make_compact_after_feedback
 
 logger = logging.getLogger(__name__)
@@ -278,7 +279,7 @@ async def select_number_quantity_and_issue(
             date_added = item.get("date_added", "")
 
             msg = format_number_message(number, date_added, resources_text)
-            await callback.message.answer(
+            sent_msg = await callback.message.answer(
                 msg,
                 parse_mode="HTML",
                 reply_markup=get_number_feedback_keyboard(
@@ -286,6 +287,15 @@ async def select_number_quantity_and_issue(
                     resources=resources_text,
                     region=region,
                 ),
+            )
+
+            # Регистрируем сообщение для автоподтверждения через 10 минут
+            pending_messages.register(
+                entity_type="number",
+                entity_id=number,
+                chat_id=sent_msg.chat.id,
+                message_id=sent_msg.message_id,
+                original_text=msg,
             )
 
         # Предлагаем продолжить
@@ -339,6 +349,9 @@ async def process_number_feedback(
         pass  # Если уже протух - игнорируем
 
     try:
+        # Снимаем с отслеживания для автоподтверждения (ручной feedback получен)
+        pending_messages.unregister(number_id)
+
         # Компактный формат сообщения
         new_text = make_compact_after_feedback(callback.message.html_text, status_display)
 
@@ -414,14 +427,25 @@ async def process_number_replace(
         date_added = item.get("date_added", "")
 
         msg = format_number_message(number, date_added, resources_text)
-        await callback.message.answer(
-            f"🔄 <b>Замена номера:</b>\n\n{msg}",
+        full_text = f"🔄 <b>Замена номера:</b>\n\n{msg}"
+
+        sent_msg = await callback.message.answer(
+            full_text,
             parse_mode="HTML",
             reply_markup=get_number_feedback_keyboard(
                 number_id=number,  # Передаём сам номер телефона
                 resources=resources_text,
                 region=region,
             ),
+        )
+
+        # Регистрируем сообщение для автоподтверждения через 10 минут
+        pending_messages.register(
+            entity_type="number",
+            entity_id=number,
+            chat_id=sent_msg.chat.id,
+            message_id=sent_msg.message_id,
+            original_text=full_text,
         )
 
         # Убираем кнопку замены с предыдущего сообщения

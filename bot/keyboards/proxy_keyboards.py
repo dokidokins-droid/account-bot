@@ -351,7 +351,7 @@ def get_proxy_list_multi_keyboard(
     # Кнопка подтверждения (если есть выбранные - показываем общее количество)
     if total_selected > 0:
         builder.button(
-            text=f"✔️ Подтвердить ({total_selected})",
+            text=f"✅ Подтвердить ({total_selected})",
             callback_data=ProxyConfirmMultiCallback(country=country),
         )
         proxy_rows.append(1)

@@ -782,7 +782,7 @@ class SheetsService:
             if email_type == Gender.GMAIL_DOMAIN:
                 return settings.SHEET_NAMES.get("gmail_gmail_domain", "Гугл Гмейл")
             else:
-                return settings.SHEET_NAMES.get("gmail_any", "Гугл Обыч")
+                return settings.SHEET_NAMES.get("gmail_any", "Гугл Любые")
         elif email_resource == EmailResource.RAMBLER:
             return settings.SHEET_NAMES.get("rambler_issued", "Рамблер Выдано")
         return "Unknown"

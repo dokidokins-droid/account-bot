@@ -252,7 +252,7 @@ class EmailResourceCallback(CallbackData, prefix="email_res"):
 
 
 class EmailTypeCallback(CallbackData, prefix="email_type"):
-    """Callback для выбора типа Gmail (Обычные/gmail.com)"""
+    """Callback для выбора типа Gmail (Любые/gmail.com)"""
     email_type: str  # any, gmail_domain
 
 
@@ -292,6 +292,23 @@ class EmailReplaceCallback(CallbackData, prefix="email_repl"):
     region: str
 
 
+# === Новый flow почт (с умным распределением) ===
+
+class EmailModeCallback(CallbackData, prefix="email_mode"):
+    """Callback для выбора режима почты (Новая/Эконом)"""
+    mode: str  # new, economy
+
+
+class EmailTargetResourceToggleCallback(CallbackData, prefix="email_tgt_tog"):
+    """Toggle выбора целевого ресурса для почты (множественный выбор)"""
+    resource: str  # ok, mamba, beboo, loloo, tabor, topface, loveru, fotostrana, loveplanet, badoo, pure, other
+
+
+class EmailTargetResourceConfirmCallback(CallbackData, prefix="email_tgt_conf"):
+    """Подтверждение выбора целевых ресурсов"""
+    pass
+
+
 # === Очистка буфера (админ) ===
 
 class BufferClearCategoryCallback(CallbackData, prefix="buf_cat"):
@@ -301,7 +318,7 @@ class BufferClearCategoryCallback(CallbackData, prefix="buf_cat"):
 
 class BufferClearResourceCallback(CallbackData, prefix="buf_res"):
     """Callback для выбора ресурса очистки"""
-    resource: str  # vk, mamba_male, mamba_female, ok, gmail_any, gmail_domain, rambler, all_accounts, all_emails
+    resource: str  # vk, mamba_male, mamba_female, ok, gmail, rambler, all_accounts, all_emails
 
 
 class BufferClearTypeCallback(CallbackData, prefix="buf_type"):
@@ -328,7 +345,7 @@ class BufferReleaseCategoryCallback(CallbackData, prefix="rel_cat"):
 
 class BufferReleaseResourceCallback(CallbackData, prefix="rel_res"):
     """Callback для выбора ресурса освобождения"""
-    resource: str  # vk, mamba_male, mamba_female, ok, gmail_any, gmail_domain, rambler, all_accounts, all_emails
+    resource: str  # vk, mamba_male, mamba_female, ok, gmail, rambler, all_accounts, all_emails
 
 
 class BufferReleaseConfirmCallback(CallbackData, prefix="rel_conf"):
@@ -339,3 +356,37 @@ class BufferReleaseConfirmCallback(CallbackData, prefix="rel_conf"):
 class BufferReleaseBackCallback(CallbackData, prefix="rel_back"):
     """Callback для кнопки назад в освобождении буфера"""
     to: str  # category, resource
+
+
+# === Аренда почт (quix.email) ===
+
+class EmailRentalMenuCallback(CallbackData, prefix="rent_menu"):
+    """Callback для открытия меню аренды почт"""
+    action: str = "open"
+
+
+class EmailRentalDomainCallback(CallbackData, prefix="rent_dom"):
+    """Callback для выбора домена почты"""
+    domain: str  # gmail.com, mail.ru и т.д.
+
+
+class EmailRentalDomainPageCallback(CallbackData, prefix="rent_page"):
+    """Callback для пагинации доменов"""
+    page: int
+
+
+class EmailRentalCancelCallback(CallbackData, prefix="rent_cancel"):
+    """Callback для отмены заказа почты"""
+    activation_id: str
+
+
+class EmailRentalRepeatCallback(CallbackData, prefix="rent_repeat"):
+    """Callback для повторного запроса письма"""
+    activation_id: str
+    email: str
+    site: str
+
+
+class EmailRentalBackCallback(CallbackData, prefix="rent_back"):
+    """Callback для кнопки назад в аренде почт"""
+    to: str  # email_menu, enter_site

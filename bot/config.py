@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     SPREADSHEET_ACCOUNTS: str
     SPREADSHEET_ISSUED: str
 
+    # Quix Email API (аренда временных почт)
+    QUIX_EMAIL_API_KEY: str = ""
+
     # Регионы (настраиваемый список)
     REGIONS: str = "546,621,545,674,538,719"
 
@@ -30,12 +33,12 @@ class Settings(BaseSettings):
         "mamba_female": "Мамб Жен",
         "ok_none": "Одноклассники",
         "gmail_gmail_domain": "Гугл Гмейл",
-        "gmail_any": "Гугл Обыч",
+        "gmail_any": "Гугл Любые",
         # Номера телефонов (общие для Beboo/Loloo/Табор)
         # Формат База: дата | номер
         # Формат Выдача: дата | номер | регион | employee | ресурсы
         "numbers": "Номера",
-        "numbers_issued": "Номера Выдано",
+        "numbers_issued": "Номера",  # Тот же лист что и база
         # Почты
         # Формат: дата | логин | пароль
         "rambler_none": "Рамблер",

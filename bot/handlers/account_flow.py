@@ -23,6 +23,7 @@ from bot.keyboards.inline import (
 from bot.models.enums import Resource, Gender
 from bot.services.account_service import account_service
 from bot.services.whitelist_service import whitelist_service
+from bot.services.pending_messages import pending_messages
 from bot.utils.formatters import format_account_message, format_selection_summary
 
 logger = logging.getLogger(__name__)
@@ -278,7 +279,7 @@ async def issue_accounts_directly(
 
             message_text = format_account_message(resource, account, region)
 
-            await callback.message.answer(
+            sent_msg = await callback.message.answer(
                 message_text,
                 reply_markup=get_feedback_keyboard(
                     account_id=account_id,
@@ -287,6 +288,15 @@ async def issue_accounts_directly(
                     region=region,
                 ),
                 parse_mode="HTML",
+            )
+
+            # Регистрируем сообщение для автоподтверждения через 10 минут
+            pending_messages.register(
+                entity_type="account",
+                entity_id=account_id,
+                chat_id=sent_msg.chat.id,
+                message_id=sent_msg.message_id,
+                original_text=message_text,
             )
 
         # Предлагаем продолжить
