@@ -2,179 +2,149 @@
   "available": {
     "beboo_tabor": [],
     "loloo_tabor": [],
-    "beboo": [
-      {
-        "number": "79961234657",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 128
-      },
-      {
-        "number": "79961234658",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 129
-      },
-      {
-        "number": "79961234659",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 130
-      },
-      {
-        "number": "79961234660",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 131
-      },
-      {
-        "number": "79961234661",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 132
-      },
-      {
-        "number": "79961234662",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 133
-      },
-      {
-        "number": "79961234663",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 134
-      },
-      {
-        "number": "79961234664",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 135
-      },
-      {
-        "number": "79961234665",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 136
-      },
-      {
-        "number": "79961234666",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 137
-      },
-      {
-        "number": "79961234667",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 138
-      },
-      {
-        "number": "79961234668",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 139
-      },
-      {
-        "number": "79961234669",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 140
-      },
-      {
-        "number": "79961234670",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 141
-      },
-      {
-        "number": "79961234671",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 142
-      },
-      {
-        "number": "79961234672",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 143
-      },
-      {
-        "number": "79961234673",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 144
-      },
-      {
-        "number": "79961234674",
-        "date_added": "23.12.25",
-        "used_for": [],
-        "row_index": 145
-      },
+    "beboo": [],
+    "tabor": [],
+    "beboo_loloo": [],
+    "loloo": [
       {
         "number": "79961234675",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 146
+        "row_index": 242
       },
       {
         "number": "79961234676",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 147
+        "row_index": 243
       },
       {
         "number": "79961234677",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 148
+        "row_index": 244
       },
       {
         "number": "79961234678",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 149
+        "row_index": 245
       },
       {
         "number": "79961234679",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 150
+        "row_index": 246
       },
       {
         "number": "79961234680",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 151
+        "row_index": 247
       },
       {
         "number": "79961234681",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 152
+        "row_index": 248
       },
       {
         "number": "79961234682",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 153
+        "row_index": 249
       },
       {
         "number": "79961234683",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 154
+        "row_index": 250
       },
       {
         "number": "79961234684",
-        "date_added": "23.12.25",
+        "date_added": "28.12.25",
         "used_for": [],
-        "row_index": 155
+        "row_index": 251
+      },
+      {
+        "number": "79961234685",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 252
+      },
+      {
+        "number": "79961234686",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 253
+      },
+      {
+        "number": "79961234687",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 254
+      },
+      {
+        "number": "79961234688",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 255
+      },
+      {
+        "number": "79961234689",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 256
+      },
+      {
+        "number": "79961234690",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 257
+      },
+      {
+        "number": "79961234691",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 258
+      },
+      {
+        "number": "79961234692",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 259
+      },
+      {
+        "number": "79961234693",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 260
+      },
+      {
+        "number": "79961234694",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 261
+      },
+      {
+        "number": "79961234695",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 262
+      },
+      {
+        "number": "79961234696",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 263
+      },
+      {
+        "number": "79961234697",
+        "date_added": "28.12.25",
+        "used_for": [],
+        "row_index": 264
       }
-    ],
-    "tabor": [],
-    "beboo_loloo": [],
-    "loloo": []
+    ]
   },
   "pending": {},
   "issued_cache": {
@@ -595,8 +565,85 @@
       "row_index": 55,
       "version": 2,
       "synced_version": 2
+    },
+    "79961234668": {
+      "number": "79961234668",
+      "date_issued": "28.12.25",
+      "region": "674",
+      "employee_stage": "Admin",
+      "resources_display": "Loloo",
+      "status": "Выбило ТГ",
+      "row_index": 58,
+      "version": 2,
+      "synced_version": 2
+    },
+    "79961234669": {
+      "number": "79961234669",
+      "date_issued": "28.12.25",
+      "region": "674",
+      "employee_stage": "Admin",
+      "resources_display": "Loloo",
+      "status": "Рабочий",
+      "row_index": 59,
+      "version": 2,
+      "synced_version": 2
+    },
+    "79961234670": {
+      "number": "79961234670",
+      "date_issued": "28.12.25",
+      "region": "674",
+      "employee_stage": "Admin",
+      "resources_display": "Loloo",
+      "status": "Рабочий",
+      "row_index": 56,
+      "version": 2,
+      "synced_version": 2
+    },
+    "79961234671": {
+      "number": "79961234671",
+      "date_issued": "28.12.25",
+      "region": "674",
+      "employee_stage": "Admin",
+      "resources_display": "Loloo",
+      "status": "Зареган",
+      "row_index": 57,
+      "version": 2,
+      "synced_version": 2
+    },
+    "79961234672": {
+      "number": "79961234672",
+      "date_issued": "28.12.25",
+      "region": "674",
+      "employee_stage": "Admin",
+      "resources_display": "Loloo",
+      "status": "Выбило ТГ",
+      "row_index": 60,
+      "version": 2,
+      "synced_version": 2
+    },
+    "79961234673": {
+      "number": "79961234673",
+      "date_issued": "28.12.25",
+      "region": "674",
+      "employee_stage": "Admin",
+      "resources_display": "Loloo",
+      "status": "Сброс",
+      "row_index": 61,
+      "version": 2,
+      "synced_version": 2
+    },
+    "79961234674": {
+      "number": "79961234674",
+      "date_issued": "28.12.25",
+      "region": "674",
+      "employee_stage": "Admin",
+      "resources_display": "Loloo",
+      "status": "Рабочий",
+      "row_index": 62,
+      "version": 2,
+      "synced_version": 2
     }
   },
   "used_for_updates": {},
-  "saved_at": 1766526696.0197244
+  "saved_at": 1767556336.607129
 }
